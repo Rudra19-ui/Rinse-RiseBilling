@@ -10,16 +10,61 @@ from typing import Any, Iterator
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "rinse_rise.db"
 
+# Railway / cloud Postgres variable names (first match wins)
+PG_ENV_KEYS = (
+    "DATABASE_URL",
+    "DATABASE_PRIVATE_URL",
+    "DATABASE_PUBLIC_URL",
+    "POSTGRES_URL",
+    "POSTGRESQL_URL",
+)
+
+
+def _resolve_database_url() -> str:
+    for key in PG_ENV_KEYS:
+        value = os.environ.get(key, "").strip()
+        if value.startswith(("postgres://", "postgresql://")):
+            return value
+    return ""
+
 
 def is_postgres() -> bool:
-    return bool(os.environ.get("DATABASE_URL", "").strip())
+    return bool(_resolve_database_url())
+
+
+def is_railway() -> bool:
+    return bool(os.environ.get("RAILWAY_ENVIRONMENT", "").strip())
 
 
 def _postgres_url() -> str:
-    url = os.environ["DATABASE_URL"].strip()
+    url = _resolve_database_url()
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://") :]
     return url
+
+
+def database_config_status() -> dict[str, Any]:
+    backend = "postgresql" if is_postgres() else "sqlite"
+    status: dict[str, Any] = {
+        "backend": backend,
+        "railway": is_railway(),
+        "postgresConfigured": is_postgres(),
+    }
+    if is_postgres():
+        for key in PG_ENV_KEYS:
+            if os.environ.get(key, "").strip().startswith(("postgres://", "postgresql://")):
+                status["postgresEnvVar"] = key
+                break
+    elif is_railway():
+        status["warning"] = (
+            "PostgreSQL is not linked. In Railway: open Rinse-RiseBilling → Variables → "
+            "New Variable → Reference → select Postgres → DATABASE_URL (or DATABASE_PRIVATE_URL)."
+        )
+    return status
+
+
+def database_backend_name() -> str:
+    return "postgresql" if is_postgres() else "sqlite"
 
 
 def date_gte(column: str) -> str:

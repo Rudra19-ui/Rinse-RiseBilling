@@ -5,7 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from db import DbConnection, date_gte, date_lte, get_connection, is_postgres
+from db import (
+    DbConnection,
+    database_backend_name,
+    database_config_status,
+    date_gte,
+    date_lte,
+    get_connection,
+    is_postgres,
+)
 
 SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -899,7 +907,3 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
         set_bill_counter(counter)
 
     return {"imported": imported, "billCounter": get_bill_counter()}
-
-
-def database_backend_name() -> str:
-    return "postgresql" if is_postgres() else "sqlite"

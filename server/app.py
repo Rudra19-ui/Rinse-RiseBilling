@@ -28,6 +28,7 @@ from database import (
     migrate_from_local,
     normalize_phone_key,
     database_backend_name,
+    database_config_status,
     set_customer_favorite,
     update_bill,
     update_bill_status,
@@ -53,7 +54,8 @@ def index():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"ok": True, "database": database_backend_name()})
+    config = database_config_status()
+    return jsonify({"ok": True, **config})
 
 
 @app.route("/api/settings/bill-counter")
@@ -239,9 +241,14 @@ def static_files(path):
 
 def bootstrap_app() -> None:
     """Run once on import so gunicorn/Docker loads the DB schema."""
+    config = database_config_status()
+    if config.get("warning"):
+        print(f"WARNING: {config['warning']}")
     init_db()
     (ROOT / "data" / "invoices").mkdir(parents=True, exist_ok=True)
-    print(f"Rinse & Rise Billing — {database_backend_name()} database ready")
+    print(f"Rinse & Rise Billing — {config['backend']} database ready")
+    if config.get("postgresEnvVar"):
+        print(f"PostgreSQL connected via {config['postgresEnvVar']}")
 
 
 bootstrap_app()
