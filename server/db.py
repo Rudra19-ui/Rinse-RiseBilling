@@ -7,10 +7,11 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import quote_plus
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "rinse_rise.db"
 
-# Railway / cloud Postgres variable names (first match wins)
+# Full connection strings (first match wins)
 PG_ENV_KEYS = (
     "DATABASE_URL",
     "DATABASE_PRIVATE_URL",
@@ -19,13 +20,75 @@ PG_ENV_KEYS = (
     "POSTGRESQL_URL",
 )
 
+# Railway also exposes split Postgres vars when referenced
+PG_PARTS_KEYS = (
+    ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"),
+    ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"),
+    ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DATABASE"),
+)
+
+
+def _normalize_postgres_url(url: str) -> str:
+    url = url.strip()
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    return url
+
+
+def _build_url_from_parts(host: str, port: str, user: str, password: str, database: str) -> str:
+    host = host.strip()
+    user = user.strip()
+    password = password.strip()
+    database = database.strip()
+    port = (port or "5432").strip()
+    if not all([host, user, password, database]):
+        return ""
+    return (
+        f"postgresql://{quote_plus(user)}:{quote_plus(password)}"
+        f"@{host}:{port}/{quote_plus(database)}"
+    )
+
 
 def _resolve_database_url() -> str:
     for key in PG_ENV_KEYS:
         value = os.environ.get(key, "").strip()
         if value.startswith(("postgres://", "postgresql://")):
-            return value
+            return _normalize_postgres_url(value)
+
+    for host_key, port_key, user_key, pass_key, db_key in PG_PARTS_KEYS:
+        url = _build_url_from_parts(
+            os.environ.get(host_key, ""),
+            os.environ.get(port_key, ""),
+            os.environ.get(user_key, ""),
+            os.environ.get(pass_key, ""),
+            os.environ.get(db_key, ""),
+        )
+        if url:
+            return url
+
     return ""
+
+
+def _postgres_env_diagnostics() -> dict[str, str]:
+    """Show which Postgres-related env vars exist (never values)."""
+    keys = list(PG_ENV_KEYS)
+    for parts in PG_PARTS_KEYS:
+        keys.extend(parts)
+    keys.extend(["RAILWAY_ENVIRONMENT", "RAILWAY_SERVICE_NAME"])
+    seen: set[str] = set()
+    diag: dict[str, str] = {}
+    for key in keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        value = os.environ.get(key, "").strip()
+        if not value:
+            diag[key] = "missing"
+        elif key in PG_ENV_KEYS:
+            diag[key] = "set (postgres url)"
+        else:
+            diag[key] = "set"
+    return diag
 
 
 def is_postgres() -> bool:
@@ -37,10 +100,7 @@ def is_railway() -> bool:
 
 
 def _postgres_url() -> str:
-    url = _resolve_database_url()
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://") :]
-    return url
+    return _resolve_database_url()
 
 
 def database_config_status() -> dict[str, Any]:
@@ -49,17 +109,28 @@ def database_config_status() -> dict[str, Any]:
         "backend": backend,
         "railway": is_railway(),
         "postgresConfigured": is_postgres(),
+        "postgresEnvDiagnostics": _postgres_env_diagnostics(),
     }
     if is_postgres():
         for key in PG_ENV_KEYS:
             if os.environ.get(key, "").strip().startswith(("postgres://", "postgresql://")):
                 status["postgresEnvVar"] = key
                 break
+        else:
+            for parts in PG_PARTS_KEYS:
+                if all(os.environ.get(k, "").strip() for k in parts):
+                    status["postgresEnvVar"] = f"{parts[0]}..{parts[-1]}"
+                    break
     elif is_railway():
         status["warning"] = (
-            "PostgreSQL is not linked. In Railway: open Rinse-RiseBilling → Variables → "
-            "New Variable → Reference → select Postgres → DATABASE_URL (or DATABASE_PRIVATE_URL)."
+            "PostgreSQL is not linked to this service. Fix in Railway dashboard (see RAILWAY_SETUP.md)."
         )
+        status["fixSteps"] = [
+            "Open Postgres service → Variables → copy DATABASE_PRIVATE_URL",
+            "Open Rinse-RiseBilling service → Variables → New Variable",
+            "Name: DATABASE_URL  Value: paste the copied URL (or use Variable Reference)",
+            "Redeploy Rinse-RiseBilling",
+        ]
     return status
 
 

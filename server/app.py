@@ -244,6 +244,8 @@ def bootstrap_app() -> None:
     config = database_config_status()
     if config.get("warning"):
         print(f"WARNING: {config['warning']}")
+        for step in config.get("fixSteps", []):
+            print(f"  → {step}")
     init_db()
     (ROOT / "data" / "invoices").mkdir(parents=True, exist_ok=True)
     print(f"Rinse & Rise Billing — {config['backend']} database ready")
