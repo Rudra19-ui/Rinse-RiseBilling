@@ -56,11 +56,12 @@ RUN cd whatsapp-bridge && npm ci --omit=dev
 COPY . .
 
 RUN mkdir -p data/invoices whatsapp-bridge/.wwebjs_auth whatsapp-bridge/.wwebjs_cache \
+    && sed -i 's/\r$//' docker-entrypoint.sh \
     && chmod +x docker-entrypoint.sh
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=15s --start-period=240s --retries=5 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
