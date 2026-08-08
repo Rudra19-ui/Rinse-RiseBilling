@@ -155,6 +155,11 @@ def normalize_phone_key(phone: str) -> str:
     return digits[-10:] if len(digits) >= 10 else digits
 
 
+def ensure_database() -> None:
+    """Create or migrate tables; safe to call before API requests."""
+    init_db()
+
+
 def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(POSTGRES_SCHEMA if is_postgres() else SQLITE_SCHEMA)
@@ -165,80 +170,99 @@ def init_db() -> None:
                 "INSERT INTO settings (key, value) VALUES (?, ?)",
                 ("bill_counter", "1"),
             )
+        _run_schema_migrations(conn)
         if is_postgres():
             conn.commit()
             return
 
-        cols = conn.table_columns("bills")
-        if "service_mode" not in cols:
-            conn.execute(
-                "ALTER TABLE bills ADD COLUMN service_mode TEXT NOT NULL DEFAULT 'door-pickup'"
-            )
-        cols = conn.table_columns("bills")
-        if "home_service_mode" not in cols:
-            conn.execute(
-                "ALTER TABLE bills ADD COLUMN home_service_mode TEXT DEFAULT 'door-pickup'"
-            )
-        if "shop_service_mode" not in cols:
-            conn.execute(
-                "ALTER TABLE bills ADD COLUMN shop_service_mode TEXT DEFAULT ''"
-            )
-        cols = conn.table_columns("bills")
-        if "payment_type" not in cols:
-            conn.execute(
-                "ALTER TABLE bills ADD COLUMN payment_type TEXT DEFAULT ''"
-            )
-        if "payment_info" not in cols:
-            conn.execute(
-                "ALTER TABLE bills ADD COLUMN payment_info TEXT DEFAULT ''"
-            )
-        customer_cols = conn.table_columns("customers")
-        if "is_favorite" not in customer_cols:
-            conn.execute(
-                "ALTER TABLE customers ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
-            )
-        item_cols = conn.table_columns("bill_items")
-        if "unit" not in item_cols:
-            conn.execute(
-                "ALTER TABLE bill_items ADD COLUMN unit TEXT DEFAULT ''"
-            )
-        conn.execute(
-            """
-            UPDATE bills SET home_service_mode = service_mode
-            WHERE service_mode IN ('door-pickup', 'door-delivery')
-              AND COALESCE(home_service_mode, '') = ''
-            """
-        )
-        conn.execute(
-            """
-            UPDATE bills SET home_service_mode = 'door-pickup'
-            WHERE service_mode = 'door-both'
-              AND COALESCE(home_service_mode, '') = ''
-            """
-        )
-        conn.execute(
-            """
-            UPDATE bills SET shop_service_mode = service_mode
-            WHERE service_mode IN ('shop-pickup', 'shop-delivery')
-              AND COALESCE(shop_service_mode, '') = ''
-            """
-        )
-        conn.execute(
-            """
-            UPDATE bills SET shop_service_mode = 'shop-pickup'
-            WHERE service_mode = 'shop-both'
-              AND COALESCE(shop_service_mode, '') = ''
-            """
-        )
-        conn.execute(
-            """
-            UPDATE bills SET home_service_mode = 'door-pickup'
-            WHERE COALESCE(home_service_mode, '') = ''
-              AND COALESCE(shop_service_mode, '') = ''
-              AND service_mode NOT LIKE 'shop%'
-            """
-        )
         conn.commit()
+
+
+def _run_schema_migrations(conn: DbConnection) -> None:
+    """Add columns that may be missing on older hosted databases."""
+    if is_postgres():
+        pg_alters = [
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS service_mode TEXT NOT NULL DEFAULT 'door-pickup'",
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS home_service_mode TEXT DEFAULT 'door-pickup'",
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS shop_service_mode TEXT DEFAULT ''",
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT ''",
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS payment_info TEXT DEFAULT ''",
+            "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_favorite INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT ''",
+        ]
+        for sql in pg_alters:
+            conn.execute(sql)
+        return
+
+    cols = conn.table_columns("bills")
+    if "service_mode" not in cols:
+        conn.execute(
+            "ALTER TABLE bills ADD COLUMN service_mode TEXT NOT NULL DEFAULT 'door-pickup'"
+        )
+    cols = conn.table_columns("bills")
+    if "home_service_mode" not in cols:
+        conn.execute(
+            "ALTER TABLE bills ADD COLUMN home_service_mode TEXT DEFAULT 'door-pickup'"
+        )
+    if "shop_service_mode" not in cols:
+        conn.execute(
+            "ALTER TABLE bills ADD COLUMN shop_service_mode TEXT DEFAULT ''"
+        )
+    cols = conn.table_columns("bills")
+    if "payment_type" not in cols:
+        conn.execute(
+            "ALTER TABLE bills ADD COLUMN payment_type TEXT DEFAULT ''"
+        )
+    if "payment_info" not in cols:
+        conn.execute(
+            "ALTER TABLE bills ADD COLUMN payment_info TEXT DEFAULT ''"
+        )
+    customer_cols = conn.table_columns("customers")
+    if "is_favorite" not in customer_cols:
+        conn.execute(
+            "ALTER TABLE customers ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
+        )
+    item_cols = conn.table_columns("bill_items")
+    if "unit" not in item_cols:
+        conn.execute(
+            "ALTER TABLE bill_items ADD COLUMN unit TEXT DEFAULT ''"
+        )
+    conn.execute(
+        """
+        UPDATE bills SET home_service_mode = service_mode
+        WHERE service_mode IN ('door-pickup', 'door-delivery')
+          AND COALESCE(home_service_mode, '') = ''
+        """
+    )
+    conn.execute(
+        """
+        UPDATE bills SET home_service_mode = 'door-pickup'
+        WHERE service_mode = 'door-both'
+          AND COALESCE(home_service_mode, '') = ''
+        """
+    )
+    conn.execute(
+        """
+        UPDATE bills SET shop_service_mode = service_mode
+        WHERE service_mode IN ('shop-pickup', 'shop-delivery')
+          AND COALESCE(shop_service_mode, '') = ''
+        """
+    )
+    conn.execute(
+        """
+        UPDATE bills SET shop_service_mode = 'shop-pickup'
+        WHERE service_mode = 'shop-both'
+          AND COALESCE(shop_service_mode, '') = ''
+        """
+    )
+    conn.execute(
+        """
+        UPDATE bills SET home_service_mode = 'door-pickup'
+        WHERE COALESCE(home_service_mode, '') = ''
+          AND COALESCE(shop_service_mode, '') = ''
+          AND service_mode NOT LIKE 'shop%'
+        """
+    )
 
 
 def utc_now_iso() -> str:

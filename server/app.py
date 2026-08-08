@@ -11,11 +11,16 @@ from flask import Flask, jsonify, request, send_from_directory, send_file
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
+from werkzeug.exceptions import HTTPException
+
+from db import get_connection
+
 from database import (
     build_customer_profile,
     create_bill,
     create_expenditure,
     delete_expenditure,
+    ensure_database,
     get_all_bills,
     get_all_expenditures,
     get_bill_by_id,
@@ -48,6 +53,30 @@ from whatsapp_send import (
 app = Flask(__name__, static_folder=str(ROOT), static_url_path="")
 
 
+@app.before_request
+def prepare_database():
+    if request.method == "OPTIONS":
+        return None
+    if not request.path.startswith("/api/"):
+        return None
+    if request.path in ("/api/health", "/api/live"):
+        return None
+    try:
+        ensure_database()
+    except Exception as exc:
+        return jsonify({"error": f"Database not ready: {exc}"}), 503
+
+
+@app.errorhandler(Exception)
+def handle_api_error(exc):
+    if isinstance(exc, HTTPException):
+        return exc
+    if request.path.startswith("/api/"):
+        app.logger.exception("API error on %s", request.path)
+        return jsonify({"error": str(exc)}), 500
+    raise exc
+
+
 @app.after_request
 def add_cors(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -72,10 +101,21 @@ def health():
     config = database_config_status()
     wa_on = whatsapp_enabled()
     wa_available = bridge_is_running() if wa_on else False
+    db_ok = False
+    db_error = None
+    try:
+        ensure_database()
+        with get_connection() as conn:
+            conn.execute("SELECT 1")
+        db_ok = True
+    except Exception as exc:
+        db_error = str(exc)
     return jsonify(
         {
             "ok": True,
             **config,
+            "dbOk": db_ok,
+            "dbError": db_error,
             "whatsappEnabled": wa_on,
             "whatsappAvailable": wa_available,
             "hosted": is_cloud_deployment(),
@@ -286,12 +326,12 @@ def bootstrap_app() -> None:
             print(f"  → {step}")
     (ROOT / "data" / "invoices").mkdir(parents=True, exist_ok=True)
     try:
-        init_db()
+        ensure_database()
         print(f"Rinse & Rise Billing — {config['backend']} database ready")
         if config.get("postgresEnvVar"):
             print(f"PostgreSQL connected via {config['postgresEnvVar']}")
     except Exception as exc:
-        print(f"ERROR: Database init failed ({exc}). App will start; fix DATABASE_URL and redeploy.")
+        print(f"ERROR: Database init failed ({exc}). Will retry on first API request.")
 
 
 bootstrap_app()

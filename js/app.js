@@ -3677,15 +3677,27 @@ async function init() {
     return;
   }
 
-  await migrateLocalStorageIfNeeded();
-  await loadBillCounter();
-  await refreshBillHistory();
   setDefaultDeliveryDateTime();
   setDefaultPaymentFields();
   setDefaultServiceModes();
   populateServices();
   renderBill();
   startBillDateClock();
+
+  try {
+    await migrateLocalStorageIfNeeded();
+    await loadBillCounter();
+  } catch (err) {
+    console.warn("Bill counter unavailable:", err);
+    updateBillMeta();
+  }
+
+  try {
+    await refreshBillHistory();
+  } catch (err) {
+    console.warn("Bill history unavailable:", err);
+    billHistoryCache = [];
+  }
 
   els.serviceSelect.addEventListener("change", onServiceChange);
   els.serviceTiles?.querySelectorAll(".service-tile").forEach((tile) => {

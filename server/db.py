@@ -241,8 +241,12 @@ def get_connection() -> Iterator[DbConnection]:
         import psycopg2
         from psycopg2.extras import RealDictCursor
 
+        url = _postgres_url()
+        if "sslmode=" not in url and "railway.internal" not in url:
+            url += "&sslmode=require" if "?" in url else "?sslmode=require"
+
         conn = psycopg2.connect(
-            _postgres_url(),
+            url,
             cursor_factory=RealDictCursor,
             connect_timeout=10,
         )
