@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rinse & Rise — Laundry Billing</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=20260809">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -92,7 +92,7 @@
         <div class="service-mode-section">
           <div class="service-mode-group">
             <p class="service-mode-title">🏠 Home Delivery</p>
-            <p class="service-mode-hint">Pickup or delivery at customer&apos;s door — cannot mix with the same type in Shop</p>
+            <p class="service-mode-hint">Pick one type only — Door Pickup and Shop Pickup cannot both be selected</p>
             <div class="service-mode-options">
               <label class="mode-chip">
                 <input type="radio" name="homeServiceMode" value="door-pickup" checked>
@@ -110,7 +110,7 @@
           </div>
           <div class="service-mode-group">
             <p class="service-mode-title">🏪 Customer will come to Shop</p>
-            <p class="service-mode-hint">Optional shop visit — cannot pick the same type as Home Delivery</p>
+            <p class="service-mode-hint">Optional — Shop Pickup/Delivery cannot mix with the same Home type. Only one &quot;Both&quot; allowed.</p>
             <div class="service-mode-options">
               <label class="mode-chip">
                 <input type="radio" name="shopServiceMode" value="shop-pickup">
@@ -544,9 +544,9 @@
   <script src="js/vendor/xlsx.full.min.js"></script>
   <script src="js/vendor/jspdf.umd.min.js"></script>
   <script src="js/vendor/jspdf.plugin.autotable.min.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/invoice-pdf.js"></script>
-  <script src="js/history-export.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/api.js?v=20260809"></script>
+  <script src="js/invoice-pdf.js?v=20260809"></script>
+  <script src="js/history-export.js?v=20260809"></script>
+  <script src="js/app.js?v=20260809"></script>
 </body>
 </html>

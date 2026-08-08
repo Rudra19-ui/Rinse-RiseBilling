@@ -464,6 +464,13 @@ body {
   color: var(--text-muted);
 }
 
+.mode-chip input:disabled:checked + span {
+  background: var(--cream-dark);
+  border-color: rgba(26, 26, 26, 0.12);
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
 @media (max-width: 900px) {
   .service-mode-section,
   .payment-section {

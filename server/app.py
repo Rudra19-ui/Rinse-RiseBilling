@@ -271,7 +271,10 @@ def api_migrate():
 def static_files(path):
     if path.startswith("api/"):
         return jsonify({"error": "Not found"}), 404
-    return send_from_directory(ROOT, path)
+    response = send_from_directory(ROOT, path)
+    if path.endswith((".js", ".css", ".html")):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 def bootstrap_app() -> None:

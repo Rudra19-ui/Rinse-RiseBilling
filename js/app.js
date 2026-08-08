@@ -254,6 +254,11 @@ function resolveServiceModeConflict(changedSide, homeMode, shopMode) {
   let home = homeMode || "";
   let shop = shopMode || "";
 
+  if (home === "door-both" && shop === "shop-both") {
+    if (changedSide === "shop") home = "";
+    else shop = "";
+  }
+
   if (changedSide === "home") {
     if (home === "door-pickup" && (shop === "shop-pickup" || shop === "shop-both")) shop = "";
     if (home === "door-delivery" && (shop === "shop-delivery" || shop === "shop-both")) shop = "";
@@ -267,9 +272,14 @@ function resolveServiceModeConflict(changedSide, homeMode, shopMode) {
   return { home, shop };
 }
 
-function normalizeServiceModes(homeMode, shopMode) {
+function normalizeServiceModes(homeMode, shopMode, changedSide = null) {
   let home = homeMode || "";
   let shop = shopMode || "";
+
+  if (home === "door-both" && shop === "shop-both") {
+    if (changedSide === "shop") home = "";
+    else shop = "";
+  }
 
   if (home === "door-both" || shop === "shop-both") {
     if (home === "door-both") return { home, shop: "" };
@@ -307,9 +317,20 @@ function applyServiceModesToForm(homeMode, shopMode) {
   });
 }
 
-function syncServiceModeConstraints() {
-  const homeVal = getHomeServiceMode();
-  const shopVal = getShopServiceMode();
+function syncServiceModeConstraints(changedSide = null) {
+  let homeVal = getHomeServiceMode();
+  let shopVal = getShopServiceMode();
+
+  if (changedSide) {
+    const resolved = resolveServiceModeConflict(changedSide, homeVal, shopVal);
+    homeVal = resolved.home;
+    shopVal = resolved.shop;
+  }
+
+  const normalized = normalizeServiceModes(homeVal, shopVal, changedSide);
+  applyServiceModesToForm(normalized.home, normalized.shop);
+  homeVal = normalized.home;
+  shopVal = normalized.shop;
 
   document.querySelectorAll('input[name="homeServiceMode"], input[name="shopServiceMode"]').forEach((radio) => {
     radio.disabled = false;
@@ -340,23 +361,11 @@ function syncServiceModeConstraints() {
 }
 
 function handleHomeServiceModeChange() {
-  const resolved = resolveServiceModeConflict(
-    "home",
-    getHomeServiceMode(),
-    getShopServiceMode()
-  );
-  applyServiceModesToForm(resolved.home, resolved.shop);
-  syncServiceModeConstraints();
+  syncServiceModeConstraints("home");
 }
 
 function handleShopServiceModeChange() {
-  const resolved = resolveServiceModeConflict(
-    "shop",
-    getHomeServiceMode(),
-    getShopServiceMode()
-  );
-  applyServiceModesToForm(resolved.home, resolved.shop);
-  syncServiceModeConstraints();
+  syncServiceModeConstraints("shop");
 }
 
 function bindToggleableServiceModeRadios(groupName, onChange) {
@@ -397,6 +406,10 @@ function setServiceModes(homeMode, shopMode) {
     if (homePickup) homePickup.checked = true;
   }
   syncServiceModeConstraints();
+}
+
+function getNormalizedServiceModes() {
+  return normalizeServiceModes(getHomeServiceMode(), getShopServiceMode());
 }
 
 function syncHistoryEditServiceModes(draft) {
@@ -2027,6 +2040,7 @@ function getSentViaLabel(sentVia) {
 }
 
 function buildCurrentBillPayload(sentVia) {
+  const modes = getNormalizedServiceModes();
   return {
     billNo: String(billCounter).padStart(4, "0"),
     createdAt: new Date().toISOString(),
@@ -2037,8 +2051,8 @@ function buildCurrentBillPayload(sentVia) {
     deliveryDisplay: formatDeliveryDateTime(),
     paymentType: getPaymentType(),
     paymentInfo: getPaymentInfo(),
-    homeServiceMode: getHomeServiceMode(),
-    shopServiceMode: getShopServiceMode(),
+    homeServiceMode: modes.home || "door-pickup",
+    shopServiceMode: modes.shop || "",
     items: billItems.map((item) => ({ ...enrichBillItem(item) })),
     subtotal: getSubtotal(),
     discountPercent: getDiscountPercent(),
@@ -3687,6 +3701,7 @@ async function init() {
   bindToggleableServiceModeRadios("shopServiceMode", handleShopServiceModeChange);
   bindToggleableServiceModeRadios("paymentType", () => {});
   bindToggleableServiceModeRadios("paymentInfo", () => {});
+  syncServiceModeConstraints();
   els.customerPhone.addEventListener("input", () => {
     updateActionButtons();
     loadCustomerProfileByPhone();
