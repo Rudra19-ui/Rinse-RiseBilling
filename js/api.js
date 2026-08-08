@@ -110,8 +110,16 @@ const API = {
     return this.request("/api/reports/overall");
   },
 
-  getWhatsAppStatus() {
-    return this.request("/api/whatsapp/status");
+  getWhatsAppStatus(startBridge = false) {
+    const qs = startBridge ? "?start=1" : "";
+    return this.request(`/api/whatsapp/status${qs}`);
+  },
+
+  startWhatsAppBridge() {
+    return this.request("/api/whatsapp/start", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   },
 
   resetWhatsAppSession() {

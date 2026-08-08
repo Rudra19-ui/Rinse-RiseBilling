@@ -8,9 +8,10 @@ const fs = require("fs");
 const QRCode = require("qrcode");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 
-const PORT = 3001;
-const AUTH_DIR = path.join(__dirname, ".wwebjs_auth");
-const CACHE_DIR = path.join(__dirname, ".wwebjs_cache");
+const PORT = Number(process.env.WHATSAPP_BRIDGE_PORT || 3001);
+const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(__dirname, ".wwebjs_auth");
+const CACHE_DIR = process.env.WHATSAPP_CACHE_DIR || path.join(__dirname, ".wwebjs_cache");
+const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || "";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -57,23 +58,33 @@ function isSessionError(err) {
 }
 
 function createClient() {
+  const puppeteerConfig = {
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--disable-extensions",
+      "--disable-background-networking",
+      "--disable-default-apps",
+      "--disable-sync",
+      "--no-first-run",
+      "--mute-audio",
+    ],
+  };
+  if (CHROME_PATH) {
+    puppeteerConfig.executablePath = CHROME_PATH;
+  }
+
   return new Client({
     authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: "rinse-rise" }),
     webVersionCache: {
       type: "local",
       path: CACHE_DIR,
     },
-    puppeteer: {
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-software-rasterizer",
-        "--disable-extensions",
-      ],
-    },
+    puppeteer: puppeteerConfig,
   });
 }
 
@@ -278,6 +289,8 @@ async function resetSession() {
 
   fs.rmSync(AUTH_DIR, { recursive: true, force: true });
   fs.rmSync(CACHE_DIR, { recursive: true, force: true });
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
 
   await initializeClient();
 }
@@ -410,7 +423,12 @@ app.post("/send", async (req, res) => {
 });
 
 app.listen(PORT, "127.0.0.1", () => {
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
   console.log(`[WhatsApp] Bridge running on http://127.0.0.1:${PORT}`);
+  if (CHROME_PATH) {
+    console.log(`[WhatsApp] Using Chromium at ${CHROME_PATH}`);
+  }
   initializeClient().catch((err) => {
     state.phase = "error";
     state.lastError = err.message;

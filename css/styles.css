@@ -694,6 +694,7 @@ body {
 
 .modal-content {
   position: relative;
+  z-index: 1;
   background: var(--white);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -1565,6 +1566,47 @@ select:disabled {
   background: rgba(0, 0, 0, 0.28);
 }
 
+.whatsapp-connect-modal {
+  z-index: 10050;
+}
+
+.whatsapp-connect-content {
+  max-width: 420px;
+}
+
+.wa-connect-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.wa-connect-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--gray-200);
+  border-top-color: #25d366;
+  border-radius: 50%;
+  animation: wa-spin 0.8s linear infinite;
+}
+
+@keyframes wa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wa-qr-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0;
+  background: #fff;
+  border-radius: 10px;
+}
+
 .wa-connect-msg {
   margin: 0 0 0.75rem;
   color: var(--text-muted);
@@ -1580,10 +1622,12 @@ select:disabled {
 
 .wa-qr-image {
   display: block;
-  width: min(260px, 100%);
-  margin: 0.75rem auto;
+  width: min(280px, 100%);
+  height: auto;
+  margin: 0 auto;
   border-radius: 8px;
   border: 1px solid var(--gray-200);
+  background: #fff;
 }
 
 .wa-connect-hint {

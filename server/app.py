@@ -34,7 +34,16 @@ from database import (
     update_bill_status,
 )
 from invoice_pdf import build_whatsapp_message, generate_invoice_pdf, invoice_filename
-from whatsapp_send import get_bridge_status, get_or_create_invoice_pdf, reset_bridge_session, send_bill_via_whatsapp
+from whatsapp_send import (
+    bridge_is_running,
+    get_bridge_status,
+    get_or_create_invoice_pdf,
+    is_cloud_deployment,
+    reset_bridge_session,
+    send_bill_via_whatsapp,
+    try_start_bridge,
+    whatsapp_enabled,
+)
 
 app = Flask(__name__, static_folder=str(ROOT), static_url_path="")
 
@@ -55,7 +64,17 @@ def index():
 @app.route("/api/health")
 def health():
     config = database_config_status()
-    return jsonify({"ok": True, **config})
+    wa_on = whatsapp_enabled()
+    wa_available = bridge_is_running() if wa_on else False
+    return jsonify(
+        {
+            "ok": True,
+            **config,
+            "whatsappEnabled": wa_on,
+            "whatsappAvailable": wa_available,
+            "hosted": is_cloud_deployment(),
+        }
+    )
 
 
 @app.route("/api/settings/bill-counter")
@@ -217,7 +236,17 @@ def api_send_bill_whatsapp(bill_id: int):
 
 @app.route("/api/whatsapp/status")
 def api_whatsapp_status():
-    return jsonify(get_bridge_status())
+    auto_start = request.args.get("start", "").lower() in ("1", "true", "yes")
+    return jsonify(get_bridge_status(auto_start=auto_start))
+
+
+@app.route("/api/whatsapp/start", methods=["POST"])
+def api_whatsapp_start():
+    if not whatsapp_enabled():
+        return jsonify({"ok": False, "error": "WhatsApp is disabled on this server.", "enabled": False})
+    started = try_start_bridge()
+    status = get_bridge_status()
+    return jsonify({"ok": started or status.get("available"), **status})
 
 
 @app.route("/api/whatsapp/reset", methods=["POST"])
@@ -257,62 +286,17 @@ bootstrap_app()
 
 
 if __name__ == "__main__":
-    import atexit
-    import shutil
-    import subprocess
-    import urllib.error
-    import urllib.request
-
-    def bridge_already_running() -> bool:
-        try:
-            req = urllib.request.Request("http://127.0.0.1:3001/health", method="GET")
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                return resp.status == 200
-        except (urllib.error.URLError, TimeoutError, OSError):
-            return False
-
-    def start_whatsapp_bridge() -> subprocess.Popen | None:
-        bridge_dir = ROOT / "whatsapp-bridge"
-        server_js = bridge_dir / "server.js"
-        node_modules = bridge_dir / "node_modules"
-        node_exe = shutil.which("node")
-        if not node_exe:
-            print("Node.js not found — install from https://nodejs.org for WhatsApp PDF sending.")
-            return None
-        if not server_js.is_file() or not node_modules.is_dir():
-            print("WhatsApp bridge not installed — run Start Billing.bat once to install it.")
-            return None
-        if bridge_already_running():
-            print("WhatsApp bridge already running on port 3001")
-            return None
-        try:
-            log_path = bridge_dir / "bridge.log"
-            log_file = open(log_path, "a", encoding="utf-8")
-            proc = subprocess.Popen(
-                [node_exe, "server.js"],
-                cwd=str(bridge_dir),
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-            )
-            print("WhatsApp bridge started — logs: whatsapp-bridge/bridge.log")
-            return proc
-        except OSError as exc:
-            print(f"Could not start WhatsApp bridge: {exc}")
-            return None
-
-    def stop_whatsapp_bridge(proc: subprocess.Popen | None) -> None:
-        if proc and proc.poll() is None:
-            proc.terminate()
-
     init_db()
     backend = database_backend_name()
     print(f"Rinse & Rise Billing — {backend} database ready (dev server)")
     print("API routes: bills, invoice PDF, WhatsApp send")
-    bridge_proc = None
-    if not os.environ.get("RAILWAY_ENVIRONMENT"):
-        bridge_proc = start_whatsapp_bridge()
-    if bridge_proc:
-        atexit.register(stop_whatsapp_bridge, bridge_proc)
+    if not is_cloud_deployment():
+        if try_start_bridge():
+            print("WhatsApp bridge started — logs: whatsapp-bridge/bridge.log")
+        elif bridge_is_running():
+            print("WhatsApp bridge already running on port 3001")
+        else:
+            print("WhatsApp bridge not running — install Node.js and run Start Billing.bat")
 
     port = int(os.environ.get("PORT", 8080))
     print(f"Open http://localhost:{port}")

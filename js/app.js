@@ -1704,7 +1704,7 @@ async function shareBillOnWhatsApp(phone, bill) {
 
   if (result.reason === "not_connected") {
     pendingWhatsAppBillId = bill.id;
-    openWhatsAppConnectModal(result.bridgeAvailable !== false);
+    openWhatsAppConnectModal();
     startPendingWhatsAppWatcher(bill.id);
     showWhatsAppToast(
       "<strong>Scan WhatsApp QR</strong>Connect WhatsApp once to send the PDF invoice automatically."
@@ -1718,7 +1718,7 @@ async function shareBillOnWhatsApp(phone, bill) {
       /detached frame|session expired|not connected|reconnect|startcomms|sendiq|\[comms\]/i.test(result.error);
     if (needsReconnect) {
       pendingWhatsAppBillId = bill.id;
-      openWhatsAppConnectModal(true);
+      openWhatsAppConnectModal();
       startPendingWhatsAppWatcher(bill.id);
       showWhatsAppToast(
         "<strong>WhatsApp reconnecting</strong>Session expired — scan QR if shown, then send again."
@@ -1744,8 +1744,12 @@ async function refreshWhatsAppStatus() {
     pill.title = status.ready
       ? "WhatsApp connected — invoices send automatically"
       : status.available
-        ? "WhatsApp waiting — click to scan QR code"
-        : "WhatsApp bridge not running — restart Start Billing.bat";
+        ? status.hosted
+          ? "WhatsApp waiting — click to scan QR code (hosted server)"
+          : "WhatsApp waiting — click to scan QR code"
+        : status.hosted
+          ? "WhatsApp scanner starting on server — click to open"
+          : "WhatsApp bridge not running — restart Start Billing.bat";
     pill.querySelector(".wa-pill-label").textContent = status.ready
       ? "WhatsApp Ready"
       : status.available
@@ -1758,33 +1762,48 @@ async function refreshWhatsAppStatus() {
   }
 }
 
-function openWhatsAppConnectModal(bridgeAvailable = true) {
+function openWhatsAppConnectModal() {
   const modal = $("#whatsappConnectModal");
   if (!modal) return;
   modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
   document.body.style.overflow = "hidden";
-  renderWhatsAppConnectBody(bridgeAvailable);
+  renderWhatsAppConnectLoading();
   clearInterval(whatsAppStatusTimer);
   whatsAppStatusTimer = setInterval(pollWhatsAppConnectModal, 2500);
-  pollWhatsAppConnectModal();
+  pollWhatsAppConnectModal(true);
+}
+
+function renderWhatsAppConnectLoading() {
+  const body = $("#whatsappConnectBody");
+  if (!body) return;
+  body.innerHTML = `
+    <div class="wa-connect-loading">
+      <div class="wa-connect-spinner" aria-hidden="true"></div>
+      <p>Opening WhatsApp scanner…</p>
+    </div>
+  `;
 }
 
 function closeWhatsAppConnectModal() {
   const modal = $("#whatsappConnectModal");
   if (!modal) return;
   modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
   clearInterval(whatsAppStatusTimer);
   whatsAppStatusTimer = null;
   refreshWhatsAppStatus();
 }
 
-async function pollWhatsAppConnectModal() {
+async function pollWhatsAppConnectModal(startBridge = false) {
   const body = $("#whatsappConnectBody");
   if (!body || $("#whatsappConnectModal")?.classList.contains("hidden")) return;
   try {
-    const status = await API.getWhatsAppStatus();
-    renderWhatsAppConnectBody(status.available, status);
+    const status = startBridge
+      ? await API.getWhatsAppStatus(true)
+      : await API.getWhatsAppStatus();
+    renderWhatsAppConnectBody(status);
     if (status.ready) {
       showWhatsAppToast("<strong>WhatsApp connected!</strong>PDF invoices will now send automatically.");
       if (pendingWhatsAppBillId) {
@@ -1793,24 +1812,41 @@ async function pollWhatsAppConnectModal() {
       setTimeout(closeWhatsAppConnectModal, 1200);
     }
   } catch {
-    renderWhatsAppConnectBody(false);
+    renderWhatsAppConnectBody({ available: false, hosted: false });
   }
 }
 
-function renderWhatsAppConnectBody(bridgeAvailable, status = null) {
+function renderWhatsAppConnectBody(status = null) {
   const body = $("#whatsappConnectBody");
   if (!body) return;
 
-  if (!bridgeAvailable) {
+  if (status?.enabled === false) {
     lastRenderedWhatsAppQr = null;
     body.innerHTML = `
-      <p class="wa-connect-msg">WhatsApp auto-send service is not running.</p>
-      <ol class="wa-connect-steps">
-        <li>Close this app</li>
-        <li>Install <strong>Node.js</strong> from nodejs.org if not installed</li>
-        <li>Restart <strong>Start Billing.bat</strong></li>
-      </ol>
+      <p class="wa-connect-msg">WhatsApp sending is turned off on this server.</p>
+      <p class="wa-connect-hint">Ask your admin to set <strong>WHATSAPP_ENABLED=1</strong> on Railway and redeploy.</p>
     `;
+    return;
+  }
+
+  const bridgeAvailable = Boolean(status?.available);
+  const hosted = Boolean(status?.hosted);
+
+  if (!bridgeAvailable) {
+    lastRenderedWhatsAppQr = null;
+    const hostedHint = hosted
+      ? `<p class="wa-connect-hint">On hosted Railway, the scanner can take <strong>1–3 minutes</strong> to start while Chrome loads. Keep this window open and click Retry.</p>`
+      : `<ol class="wa-connect-steps">
+          <li>Install <strong>Node.js</strong> from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> if not installed</li>
+          <li>Close this page and restart <strong>Start Billing.bat</strong></li>
+          <li>Click the <strong>WhatsApp</strong> button in the header again</li>
+        </ol>`;
+    body.innerHTML = `
+      <p class="wa-connect-msg">${hosted ? "WhatsApp scanner is starting on the server…" : "WhatsApp scanner service is not running yet."}</p>
+      ${hostedHint}
+      <button type="button" class="btn btn-primary wa-reset-btn" id="whatsappStartBridgeBtn">${hosted ? "Retry Scanner" : "Start WhatsApp Scanner"}</button>
+    `;
+    bindWhatsAppStartButton();
     return;
   }
 
@@ -1860,7 +1896,9 @@ function renderWhatsAppConnectBody(bridgeAvailable, status = null) {
     lastRenderedWhatsAppQr = status.qr;
     body.innerHTML = `
       <p class="wa-connect-msg">Open WhatsApp on your phone → <strong>Linked Devices</strong> → <strong>Link a Device</strong>, then scan this QR code.</p>
-      <img class="wa-qr-image" src="${status.qr}" alt="WhatsApp QR code">
+      <div class="wa-qr-wrap">
+        <img class="wa-qr-image" src="${status.qr}" alt="WhatsApp QR code" width="280" height="280">
+      </div>
       ${errorHtml}
       <p class="wa-connect-hint">QR refreshes every ~20 seconds. If scan fails, wait for a new code or click Reset Connection.</p>
       <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
@@ -1881,6 +1919,26 @@ function renderWhatsAppConnectBody(bridgeAvailable, status = null) {
 
 function bindWhatsAppResetButton() {
   $("#whatsappResetBtn")?.addEventListener("click", resetWhatsAppConnection);
+}
+
+async function bindWhatsAppStartButton() {
+  const btn = $("#whatsappStartBridgeBtn");
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = "1";
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+    try {
+      await API.startWhatsAppBridge();
+      renderWhatsAppConnectLoading();
+      setTimeout(() => pollWhatsAppConnectModal(true), 1500);
+    } catch (err) {
+      showWhatsAppToast(`<strong>Could not start scanner</strong>${escapeHtml(err.message || "Restart Start Billing.bat")}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Start WhatsApp Scanner";
+    }
+  });
 }
 
 async function resetWhatsAppConnection() {
@@ -3668,7 +3726,7 @@ async function init() {
   els.calculateProfitBtn.addEventListener("click", showProfitLossReport);
   els.closeProfitLoss.addEventListener("click", hideProfitLossReport);
   els.profitLossBackdrop.addEventListener("click", hideProfitLossReport);
-  els.whatsappStatusPill?.addEventListener("click", () => openWhatsAppConnectModal(true));
+  els.whatsappStatusPill?.addEventListener("click", () => openWhatsAppConnectModal());
   els.closeWhatsAppConnect?.addEventListener("click", closeWhatsAppConnectModal);
   els.whatsappConnectBackdrop?.addEventListener("click", closeWhatsAppConnectModal);
   refreshWhatsAppStatus();

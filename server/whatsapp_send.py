@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -10,8 +13,56 @@ from typing import Any
 
 from invoice_pdf import build_whatsapp_message, generate_invoice_pdf, invoice_filename
 
-BRIDGE_URL = "http://127.0.0.1:3001"
+ROOT = Path(__file__).resolve().parent.parent
+BRIDGE_DIR = ROOT / "whatsapp-bridge"
+BRIDGE_URL = os.environ.get("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3001").rstrip("/")
 BRIDGE_TIMEOUT = 60
+BRIDGE_STATUS_TIMEOUT = 8
+
+
+def is_cloud_deployment() -> bool:
+    return bool(os.environ.get("RAILWAY_ENVIRONMENT"))
+
+
+def whatsapp_enabled() -> bool:
+    return os.environ.get("WHATSAPP_ENABLED", "1") not in ("0", "false", "False", "no")
+
+
+def bridge_is_running() -> bool:
+    try:
+        req = urllib.request.Request(f"{BRIDGE_URL}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
+def try_start_bridge() -> bool:
+    """Start the Node WhatsApp bridge if installed and not already running."""
+    if not whatsapp_enabled():
+        return False
+    if bridge_is_running():
+        return True
+
+    node_exe = shutil.which("node")
+    server_js = BRIDGE_DIR / "server.js"
+    node_modules = BRIDGE_DIR / "node_modules"
+    if not node_exe or not server_js.is_file() or not node_modules.is_dir():
+        return False
+
+    try:
+        log_path = BRIDGE_DIR / "bridge.log"
+        log_file = open(log_path, "a", encoding="utf-8")
+        subprocess.Popen(
+            [node_exe, "server.js"],
+            cwd=str(BRIDGE_DIR),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except OSError:
+        return False
 
 
 def normalize_whatsapp_phone(phone: str) -> str:
@@ -23,7 +74,13 @@ def normalize_whatsapp_phone(phone: str) -> str:
     return digits
 
 
-def _bridge_request(path: str, method: str = "GET", payload: dict | None = None) -> dict[str, Any]:
+def _bridge_request(
+    path: str,
+    method: str = "GET",
+    payload: dict | None = None,
+    *,
+    timeout: int | None = None,
+) -> dict[str, Any]:
     data = None
     headers = {}
     if payload is not None:
@@ -35,13 +92,27 @@ def _bridge_request(path: str, method: str = "GET", payload: dict | None = None)
         headers=headers,
         method=method,
     )
-    with urllib.request.urlopen(req, timeout=BRIDGE_TIMEOUT) as resp:
+    with urllib.request.urlopen(req, timeout=timeout or BRIDGE_TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def get_bridge_status() -> dict[str, Any]:
+def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
+    hosted = is_cloud_deployment()
+    if not whatsapp_enabled():
+        return {
+            "available": False,
+            "ready": False,
+            "qr": None,
+            "lastError": "WhatsApp is disabled on this server.",
+            "hosted": hosted,
+            "enabled": False,
+        }
+
+    if auto_start and not bridge_is_running():
+        try_start_bridge()
+
     try:
-        status = _bridge_request("/status")
+        status = _bridge_request("/status", timeout=BRIDGE_STATUS_TIMEOUT)
         return {
             "available": True,
             "ready": bool(status.get("ready")),
@@ -49,9 +120,19 @@ def get_bridge_status() -> dict[str, Any]:
             "lastError": status.get("lastError"),
             "phase": status.get("phase"),
             "loadingPercent": status.get("loadingPercent"),
+            "hosted": hosted,
+            "enabled": True,
         }
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-        return {"available": False, "ready": False, "qr": None, "lastError": None}
+        return {
+            "available": False,
+            "ready": False,
+            "qr": None,
+            "lastError": None,
+            "phase": "starting",
+            "hosted": hosted,
+            "enabled": True,
+        }
 
 
 def reset_bridge_session() -> dict[str, Any]:

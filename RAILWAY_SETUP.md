@@ -67,3 +67,54 @@ DATABASE_URL = postgresql://postgres:****@postgres.railway.internal:5432/railway
 ```
 
 If that row is missing, the app cannot use PostgreSQL.
+
+## WhatsApp QR scanner on hosted Railway
+
+The Docker image now runs **both** the billing app and the WhatsApp scanner in the same container.
+
+### One-time setup
+
+1. **Generate a public domain** (Settings → Networking → Generate Domain) if you have not already.
+2. **Increase memory** (recommended **≥ 1 GB RAM**) — Chrome needs memory for WhatsApp Web.
+3. **Add a volume** so you only scan the QR once (optional but strongly recommended):
+   - Rinse-RiseBilling → **Volumes** → **Add Volume**
+   - Mount path: `/app/whatsapp-bridge/.wwebjs_auth`
+   - Size: 1 GB is enough
+4. **Redeploy** the service after adding the volume.
+
+### Connect WhatsApp on the hosted site
+
+1. Open your public URL (e.g. `https://your-app.up.railway.app`)
+2. Click the **WhatsApp** button in the header
+3. Wait 1–3 minutes on first deploy while the scanner starts
+4. Scan the QR code with your phone (WhatsApp → Linked Devices → Link a Device)
+5. After connected, invoice PDFs send automatically when you click **Send on WhatsApp**
+
+### Verify in logs
+
+After deploy, **Deploy Logs** should include:
+
+```text
+Starting WhatsApp bridge...
+WhatsApp bridge is ready
+Starting Gunicorn on port 8080
+```
+
+Check health:
+
+```text
+https://YOUR-RAILWAY-DOMAIN/api/health
+```
+
+Look for `"whatsappEnabled": true` and `"whatsappAvailable": true`.
+
+### If QR never appears
+
+- Wait 2–3 minutes and click **Retry Scanner**
+- Check **Deploy Logs** for `[WhatsApp] Init failed` or Chrome errors
+- Upgrade plan/memory if the container runs out of RAM
+- Click **Reset Connection** in the modal and scan again
+
+### Disable WhatsApp on server (optional)
+
+Set variable `WHATSAPP_ENABLED=0` on the Railway service and redeploy.

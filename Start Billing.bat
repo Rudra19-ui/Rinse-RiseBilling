@@ -17,6 +17,9 @@ if %ERRORLEVEL%==0 (
     call npm install
     cd ..
   )
+  echo Starting WhatsApp scanner service...
+  start "WhatsApp Scanner" /MIN cmd /c "cd /d "%~dp0whatsapp-bridge" && node server.js >> bridge.log 2>&1"
+  timeout /t 2 /nobreak >nul
 ) else (
   echo NOTE: Install Node.js from https://nodejs.org for automatic PDF sending on WhatsApp.
   echo.
