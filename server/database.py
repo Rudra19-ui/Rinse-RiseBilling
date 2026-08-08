@@ -1,13 +1,145 @@
-"""SQLite database layer for Rinse & Rise billing."""
+"""Database layer for Rinse & Rise billing (PostgreSQL or SQLite)."""
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "rinse_rise.db"
+from db import DbConnection, date_gte, date_lte, get_connection, is_postgres
+
+SQLITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS customers (
+    phone_key TEXT PRIMARY KEY,
+    phone TEXT NOT NULL,
+    name TEXT,
+    profile_created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    is_favorite INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS bills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bill_no TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    customer_name TEXT,
+    customer_phone TEXT,
+    phone_key TEXT,
+    delivery_date TEXT,
+    delivery_time TEXT,
+    delivery_display TEXT,
+    service_mode TEXT NOT NULL DEFAULT 'door-pickup',
+    home_service_mode TEXT DEFAULT 'door-pickup',
+    shop_service_mode TEXT DEFAULT '',
+    payment_type TEXT DEFAULT '',
+    payment_info TEXT DEFAULT '',
+    subtotal REAL NOT NULL DEFAULT 0,
+    discount_percent REAL NOT NULL DEFAULT 0,
+    discount_amount REAL NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    sent_via TEXT NOT NULL DEFAULT 'saved',
+    delivery_status TEXT NOT NULL DEFAULT 'pending',
+    completed_at TEXT,
+    FOREIGN KEY (phone_key) REFERENCES customers(phone_key)
+);
+
+CREATE TABLE IF NOT EXISTS bill_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bill_id INTEGER NOT NULL,
+    item_key TEXT,
+    name TEXT NOT NULL,
+    service TEXT NOT NULL,
+    category TEXT,
+    rate REAL NOT NULL,
+    qty REAL NOT NULL DEFAULT 1,
+    unit TEXT DEFAULT '',
+    FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_bills_phone ON bills(phone_key);
+CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(delivery_status);
+CREATE INDEX IF NOT EXISTS idx_bills_created ON bills(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bill_items_bill ON bill_items(bill_id);
+
+CREATE TABLE IF NOT EXISTS expenditures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_expenditures_created ON expenditures(created_at DESC);
+"""
+
+POSTGRES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS customers (
+    phone_key TEXT PRIMARY KEY,
+    phone TEXT NOT NULL,
+    name TEXT,
+    profile_created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    is_favorite INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS bills (
+    id SERIAL PRIMARY KEY,
+    bill_no TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    customer_name TEXT,
+    customer_phone TEXT,
+    phone_key TEXT REFERENCES customers(phone_key),
+    delivery_date TEXT,
+    delivery_time TEXT,
+    delivery_display TEXT,
+    service_mode TEXT NOT NULL DEFAULT 'door-pickup',
+    home_service_mode TEXT DEFAULT 'door-pickup',
+    shop_service_mode TEXT DEFAULT '',
+    payment_type TEXT DEFAULT '',
+    payment_info TEXT DEFAULT '',
+    subtotal DOUBLE PRECISION NOT NULL DEFAULT 0,
+    discount_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
+    discount_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+    total DOUBLE PRECISION NOT NULL DEFAULT 0,
+    sent_via TEXT NOT NULL DEFAULT 'saved',
+    delivery_status TEXT NOT NULL DEFAULT 'pending',
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bill_items (
+    id SERIAL PRIMARY KEY,
+    bill_id INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
+    item_key TEXT,
+    name TEXT NOT NULL,
+    service TEXT NOT NULL,
+    category TEXT,
+    rate DOUBLE PRECISION NOT NULL,
+    qty DOUBLE PRECISION NOT NULL DEFAULT 1,
+    unit TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_bills_phone ON bills(phone_key);
+CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(delivery_status);
+CREATE INDEX IF NOT EXISTS idx_bills_created ON bills(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bill_items_bill ON bill_items(bill_id);
+
+CREATE TABLE IF NOT EXISTS expenditures (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    amount DOUBLE PRECISION NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_expenditures_created ON expenditures(created_at DESC);
+"""
 
 
 def normalize_phone_key(phone: str) -> str:
@@ -15,82 +147,9 @@ def normalize_phone_key(phone: str) -> str:
     return digits[-10:] if len(digits) >= 10 else digits
 
 
-def get_connection() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
 def init_db() -> None:
     with get_connection() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS customers (
-                phone_key TEXT PRIMARY KEY,
-                phone TEXT NOT NULL,
-                name TEXT,
-                profile_created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                is_favorite INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS bills (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                bill_no TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL,
-                customer_name TEXT,
-                customer_phone TEXT,
-                phone_key TEXT,
-                delivery_date TEXT,
-                delivery_time TEXT,
-                delivery_display TEXT,
-                service_mode TEXT NOT NULL DEFAULT 'door-pickup',
-                home_service_mode TEXT DEFAULT 'door-pickup',
-                shop_service_mode TEXT DEFAULT '',
-                subtotal REAL NOT NULL DEFAULT 0,
-                discount_percent REAL NOT NULL DEFAULT 0,
-                discount_amount REAL NOT NULL DEFAULT 0,
-                total REAL NOT NULL DEFAULT 0,
-                sent_via TEXT NOT NULL DEFAULT 'saved',
-                delivery_status TEXT NOT NULL DEFAULT 'pending',
-                completed_at TEXT,
-                FOREIGN KEY (phone_key) REFERENCES customers(phone_key)
-            );
-
-            CREATE TABLE IF NOT EXISTS bill_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                bill_id INTEGER NOT NULL,
-                item_key TEXT,
-                name TEXT NOT NULL,
-                service TEXT NOT NULL,
-                category TEXT,
-                rate REAL NOT NULL,
-                qty INTEGER NOT NULL DEFAULT 1,
-                FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_bills_phone ON bills(phone_key);
-            CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(delivery_status);
-            CREATE INDEX IF NOT EXISTS idx_bills_created ON bills(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_bill_items_bill ON bill_items(bill_id);
-
-            CREATE TABLE IF NOT EXISTS expenditures (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                amount REAL NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_expenditures_created ON expenditures(created_at DESC);
-            """
-        )
+        conn.executescript(POSTGRES_SCHEMA if is_postgres() else SQLITE_SCHEMA)
         if not conn.execute(
             "SELECT 1 FROM settings WHERE key = ?", ("bill_counter",)
         ).fetchone():
@@ -98,12 +157,16 @@ def init_db() -> None:
                 "INSERT INTO settings (key, value) VALUES (?, ?)",
                 ("bill_counter", "1"),
             )
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(bills)")}
+        if is_postgres():
+            conn.commit()
+            return
+
+        cols = conn.table_columns("bills")
         if "service_mode" not in cols:
             conn.execute(
                 "ALTER TABLE bills ADD COLUMN service_mode TEXT NOT NULL DEFAULT 'door-pickup'"
             )
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(bills)")}
+        cols = conn.table_columns("bills")
         if "home_service_mode" not in cols:
             conn.execute(
                 "ALTER TABLE bills ADD COLUMN home_service_mode TEXT DEFAULT 'door-pickup'"
@@ -112,7 +175,7 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE bills ADD COLUMN shop_service_mode TEXT DEFAULT ''"
             )
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(bills)")}
+        cols = conn.table_columns("bills")
         if "payment_type" not in cols:
             conn.execute(
                 "ALTER TABLE bills ADD COLUMN payment_type TEXT DEFAULT ''"
@@ -121,12 +184,12 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE bills ADD COLUMN payment_info TEXT DEFAULT ''"
             )
-        customer_cols = {r[1] for r in conn.execute("PRAGMA table_info(customers)")}
+        customer_cols = conn.table_columns("customers")
         if "is_favorite" not in customer_cols:
             conn.execute(
                 "ALTER TABLE customers ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
             )
-        item_cols = {r[1] for r in conn.execute("PRAGMA table_info(bill_items)")}
+        item_cols = conn.table_columns("bill_items")
         if "unit" not in item_cols:
             conn.execute(
                 "ALTER TABLE bill_items ADD COLUMN unit TEXT DEFAULT ''"
@@ -216,8 +279,14 @@ def _infer_item_unit(item: dict[str, Any]) -> str:
     return "pc"
 
 
-def _fetch_items(conn: sqlite3.Connection, bill_id: int) -> list[dict[str, Any]]:
-    item_cols = {r[1] for r in conn.execute("PRAGMA table_info(bill_items)")}
+def _row_keys(row: Any) -> set[str]:
+    if hasattr(row, "keys"):
+        return set(row.keys())
+    return set()
+
+
+def _fetch_items(conn: DbConnection, bill_id: int) -> list[dict[str, Any]]:
+    item_cols = conn.table_columns("bill_items")
     has_unit = "unit" in item_cols
     if has_unit:
         rows = conn.execute(
@@ -237,6 +306,7 @@ def _fetch_items(conn: sqlite3.Connection, bill_id: int) -> list[dict[str, Any]]
         ).fetchall()
     items = []
     for r in rows:
+        keys = _row_keys(r)
         item = {
             "key": r["item_key"] or "",
             "name": r["name"],
@@ -245,7 +315,6 @@ def _fetch_items(conn: sqlite3.Connection, bill_id: int) -> list[dict[str, Any]]
             "rate": r["rate"],
             "qty": float(r["qty"] or 0),
         }
-        keys = r.keys()
         item["unit"] = _infer_item_unit(
             {**item, "unit": (r["unit"] if has_unit and "unit" in keys else "") or ""}
         )
@@ -253,8 +322,8 @@ def _fetch_items(conn: sqlite3.Connection, bill_id: int) -> list[dict[str, Any]]
     return items
 
 
-def _bill_service_modes_from_row(row: sqlite3.Row) -> tuple[str, str]:
-    keys = row.keys()
+def _bill_service_modes_from_row(row: Any) -> tuple[str, str]:
+    keys = _row_keys(row)
     home = (row["home_service_mode"] if "home_service_mode" in keys else "") or ""
     shop = (row["shop_service_mode"] if "shop_service_mode" in keys else "") or ""
 
@@ -276,8 +345,9 @@ def _bill_service_modes_from_row(row: sqlite3.Row) -> tuple[str, str]:
     return home, shop
 
 
-def row_to_bill(row: sqlite3.Row, items: list[dict[str, Any]]) -> dict[str, Any]:
+def row_to_bill(row: Any, items: list[dict[str, Any]]) -> dict[str, Any]:
     home_mode, shop_mode = _bill_service_modes_from_row(row)
+    keys = _row_keys(row)
     return {
         "id": row["id"],
         "billNo": row["bill_no"],
@@ -287,8 +357,8 @@ def row_to_bill(row: sqlite3.Row, items: list[dict[str, Any]]) -> dict[str, Any]
         "deliveryDate": row["delivery_date"] or "",
         "deliveryTime": row["delivery_time"] or "",
         "deliveryDisplay": row["delivery_display"] or "",
-        "paymentType": (row["payment_type"] if "payment_type" in row.keys() else "") or "",
-        "paymentInfo": (row["payment_info"] if "payment_info" in row.keys() else "") or "",
+        "paymentType": (row["payment_type"] if "payment_type" in keys else "") or "",
+        "paymentInfo": (row["payment_info"] if "payment_info" in keys else "") or "",
         "serviceMode": home_mode,
         "homeServiceMode": home_mode,
         "shopServiceMode": shop_mode,
@@ -332,7 +402,7 @@ def get_bills_by_phone(phone_key: str) -> list[dict[str, Any]]:
         return [row_to_bill(r, _fetch_items(conn, r["id"])) for r in rows]
 
 
-def upsert_customer(phone: str, name: str, conn: sqlite3.Connection) -> str:
+def upsert_customer(phone: str, name: str, conn: DbConnection) -> str:
     phone_key = normalize_phone_key(phone)
     if len(phone_key) < 10:
         return phone_key
@@ -372,7 +442,7 @@ def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
     with get_connection() as conn:
         phone_key = upsert_customer(phone, name, conn)
 
-        cur = conn.execute(
+        bill_id = conn.insert_returning_id(
             """
             INSERT INTO bills (
                 bill_no, created_at, customer_name, customer_phone, phone_key,
@@ -406,7 +476,6 @@ def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
                 payload.get("completedAt"),
             ),
         )
-        bill_id = cur.lastrowid
 
         for item in payload.get("items", []):
             conn.execute(
@@ -456,7 +525,7 @@ def update_bill_status(bill_id: int, status: str) -> dict[str, Any] | None:
             (status, completed_at, bill_id),
         )
         conn.commit()
-        return get_bill_by_id(bill_id)
+    return get_bill_by_id(bill_id)
 
 
 def update_bill(bill_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -613,7 +682,7 @@ def set_customer_favorite(
     return {"phoneKey": phone_key, "isFavorite": favorite}
 
 
-def row_to_expenditure(row: sqlite3.Row) -> dict[str, Any]:
+def row_to_expenditure(row: Any) -> dict[str, Any]:
     return {
         "id": row["id"],
         "name": row["name"],
@@ -628,10 +697,10 @@ def get_all_expenditures(
     query = "SELECT * FROM expenditures WHERE 1=1"
     params: list[str] = []
     if date_from:
-        query += " AND date(created_at) >= date(?)"
+        query += f" AND {date_gte('created_at')}"
         params.append(date_from)
     if date_to:
-        query += " AND date(created_at) <= date(?)"
+        query += f" AND {date_lte('created_at')}"
         params.append(date_to)
     query += " ORDER BY created_at DESC, id DESC"
 
@@ -657,13 +726,13 @@ def create_expenditure(
         created_at = utc_now_iso()
 
     with get_connection() as conn:
-        cur = conn.execute(
+        exp_id = conn.insert_returning_id(
             "INSERT INTO expenditures (name, amount, created_at) VALUES (?, ?, ?)",
             (name, amount, created_at),
         )
         conn.commit()
         row = conn.execute(
-            "SELECT * FROM expenditures WHERE id = ?", (cur.lastrowid,)
+            "SELECT * FROM expenditures WHERE id = ?", (exp_id,)
         ).fetchone()
         return row_to_expenditure(row)
 
@@ -683,10 +752,10 @@ def get_profit_loss_summary(
     bill_query = "SELECT * FROM bills WHERE 1=1"
     bill_params: list[str] = []
     if date_from:
-        bill_query += " AND date(created_at) >= date(?)"
+        bill_query += f" AND {date_gte('created_at')}"
         bill_params.append(date_from)
     if date_to:
-        bill_query += " AND date(created_at) <= date(?)"
+        bill_query += f" AND {date_lte('created_at')}"
         bill_params.append(date_to)
     bill_query += " ORDER BY created_at DESC, id DESC"
 
@@ -830,3 +899,7 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
         set_bill_counter(counter)
 
     return {"imported": imported, "billCounter": get_bill_counter()}
+
+
+def database_backend_name() -> str:
+    return "postgresql" if is_postgres() else "sqlite"

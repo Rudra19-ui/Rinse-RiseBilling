@@ -37,6 +37,62 @@ laundry-billing/
 └── Start Billing.bat   # One-click launcher
 ```
 
+## Database
+
+The app uses **SQLite** locally by default (`data/rinse_rise.db`).
+
+For **PostgreSQL on Railway**, set the `DATABASE_URL` environment variable. Tables are created automatically on first run.
+
+### Railway setup
+
+1. Create a [Railway](https://railway.app) project and add **PostgreSQL**
+2. Deploy this repo (GitHub: `Rudra19-ui/Rinse-RiseBilling`)
+3. In your **web service** → **Variables**, link Postgres or add `DATABASE_URL`
+   - Railway injects this automatically when Postgres is linked to the web service
+   - Use the URL Railway provides for the web service (the `*.railway.internal` host works **inside Railway only**)
+4. Deploy — health check: `/api/health` should return `"database": "postgresql"`
+
+### Local dev with Railway Postgres
+
+Copy `.env.example` to `.env` and paste the **public** Postgres URL from Railway (host like `*.proxy.rlwy.net` or `*.railway.app` — **not** `postgres.railway.internal`).
+
+```env
+DATABASE_URL=postgresql://postgres:PASSWORD@HOST:PORT/railway
+```
+
+Then run `Start Billing.bat` as usual.
+
+## Docker deployment
+
+### Railway (recommended)
+
+1. Push this repo to GitHub
+2. Railway → **New Project** → **Deploy from GitHub** → select `Rinse-RiseBilling`
+3. Add **PostgreSQL** and **link** it to the web service (`DATABASE_URL` is set automatically)
+4. Railway detects `Dockerfile` and builds the container
+5. Open the generated URL — app runs on port `8080` inside the container
+
+Health check: `GET /api/health` → `{"ok": true, "database": "postgresql"}`
+
+### Docker locally (with PostgreSQL)
+
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+
+```bash
+docker compose up --build
+```
+
+Open [http://localhost:8080](http://localhost:8080)
+
+### Docker build only
+
+```bash
+docker build -t rinse-rise-billing .
+docker run -p 8080:8080 -e DATABASE_URL="your-postgres-url" rinse-rise-billing
+```
+
+**Note:** WhatsApp PDF send is for local Windows use (`Start Billing.bat` + Node bridge). Docker/Railway deployment covers billing, history, PDF download, and PostgreSQL storage.
+
 ## Notes
 
 - Database file `data/rinse_rise.db` is created locally and is not committed to git.

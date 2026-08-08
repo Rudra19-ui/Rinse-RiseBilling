@@ -1,10 +1,15 @@
-"""Flask API server for Rinse & Rise billing (SQLite backend)."""
+"""Flask API server for Rinse & Rise billing (PostgreSQL or SQLite backend)."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, send_file
+
+ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
 
 from database import (
     build_customer_profile,
@@ -22,14 +27,13 @@ from database import (
     init_db,
     migrate_from_local,
     normalize_phone_key,
+    database_backend_name,
     set_customer_favorite,
     update_bill,
     update_bill_status,
 )
 from invoice_pdf import build_whatsapp_message, generate_invoice_pdf, invoice_filename
 from whatsapp_send import get_bridge_status, get_or_create_invoice_pdf, reset_bridge_session, send_bill_via_whatsapp
-
-ROOT = Path(__file__).resolve().parent.parent
 
 app = Flask(__name__, static_folder=str(ROOT), static_url_path="")
 
@@ -49,7 +53,7 @@ def index():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"ok": True, "database": "sqlite"})
+    return jsonify({"ok": True, "database": database_backend_name()})
 
 
 @app.route("/api/settings/bill-counter")
@@ -233,6 +237,16 @@ def static_files(path):
     return send_from_directory(ROOT, path)
 
 
+def bootstrap_app() -> None:
+    """Run once on import so gunicorn/Docker loads the DB schema."""
+    init_db()
+    (ROOT / "data" / "invoices").mkdir(parents=True, exist_ok=True)
+    print(f"Rinse & Rise Billing — {database_backend_name()} database ready")
+
+
+bootstrap_app()
+
+
 if __name__ == "__main__":
     import atexit
     import shutil
@@ -282,11 +296,15 @@ if __name__ == "__main__":
             proc.terminate()
 
     init_db()
-    print("Rinse & Rise Billing — SQLite database ready")
+    backend = database_backend_name()
+    print(f"Rinse & Rise Billing — {backend} database ready (dev server)")
     print("API routes: bills, invoice PDF, WhatsApp send")
-    bridge_proc = start_whatsapp_bridge()
+    bridge_proc = None
+    if not os.environ.get("RAILWAY_ENVIRONMENT"):
+        bridge_proc = start_whatsapp_bridge()
     if bridge_proc:
         atexit.register(stop_whatsapp_bridge, bridge_proc)
 
-    print("Open http://localhost:8080")
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    port = int(os.environ.get("PORT", 8080))
+    print(f"Open http://localhost:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
