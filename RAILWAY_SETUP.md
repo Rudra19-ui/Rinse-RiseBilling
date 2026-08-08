@@ -115,6 +115,15 @@ Look for `"whatsappEnabled": true` and `"whatsappAvailable": true`.
 - Upgrade plan/memory if the container runs out of RAM
 - Click **Reset Connection** in the modal and scan again
 
+### Enable WhatsApp QR on Railway
+
+WhatsApp is **off by default** on deploy (saves RAM so health checks pass). To turn it on:
+
+1. Rinse-RiseBilling → **Variables** → add `WHATSAPP_ENABLED` = `1`
+2. Use **≥ 1 GB RAM** on the service
+3. **Redeploy**
+4. Open the app → click **WhatsApp** → scan QR
+
 ### Disable WhatsApp on server (optional)
 
 Set variable `WHATSAPP_ENABLED=0` on the Railway service and redeploy.

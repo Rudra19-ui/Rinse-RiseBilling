@@ -61,6 +61,12 @@ def index():
     return send_from_directory(ROOT, "index.html")
 
 
+@app.route("/api/live")
+def live():
+    """Fast liveness probe for Railway — no DB or WhatsApp checks."""
+    return jsonify({"ok": True})
+
+
 @app.route("/api/health")
 def health():
     config = database_config_status()
@@ -275,11 +281,14 @@ def bootstrap_app() -> None:
         print(f"WARNING: {config['warning']}")
         for step in config.get("fixSteps", []):
             print(f"  → {step}")
-    init_db()
     (ROOT / "data" / "invoices").mkdir(parents=True, exist_ok=True)
-    print(f"Rinse & Rise Billing — {config['backend']} database ready")
-    if config.get("postgresEnvVar"):
-        print(f"PostgreSQL connected via {config['postgresEnvVar']}")
+    try:
+        init_db()
+        print(f"Rinse & Rise Billing — {config['backend']} database ready")
+        if config.get("postgresEnvVar"):
+            print(f"PostgreSQL connected via {config['postgresEnvVar']}")
+    except Exception as exc:
+        print(f"ERROR: Database init failed ({exc}). App will start; fix DATABASE_URL and redeploy.")
 
 
 bootstrap_app()

@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     WHATSAPP_BRIDGE_PORT=3001 \
     WHATSAPP_AUTH_DIR=/app/whatsapp-bridge/.wwebjs_auth \
     WHATSAPP_CACHE_DIR=/app/whatsapp-bridge/.wwebjs_cache \
-    WHATSAPP_ENABLED=1
+    WHATSAPP_ENABLED=0
 
 WORKDIR /app
 
@@ -61,7 +61,7 @@ RUN mkdir -p data/invoices whatsapp-bridge/.wwebjs_auth whatsapp-bridge/.wwebjs_
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=6 \
+    CMD curl -fsS "http://127.0.0.1:${PORT}/api/live" || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -4,22 +4,22 @@ set -e
 PORT="${PORT:-8080}"
 
 start_bridge_background() {
-  if [ "${WHATSAPP_ENABLED:-1}" = "0" ]; then
-    echo "WhatsApp bridge disabled (WHATSAPP_ENABLED=0)"
+  if [ "${WHATSAPP_ENABLED:-0}" = "0" ]; then
+    echo "WhatsApp bridge disabled (set WHATSAPP_ENABLED=1 on Railway to enable QR scanner)"
     return 0
   fi
 
-  echo "Starting WhatsApp bridge in background..."
+  echo "WhatsApp bridge will start in 30s (after web server is up)..."
   mkdir -p "${WHATSAPP_AUTH_DIR:-/app/whatsapp-bridge/.wwebjs_auth}"
   mkdir -p "${WHATSAPP_CACHE_DIR:-/app/whatsapp-bridge/.wwebjs_cache}"
   mkdir -p /app/data/invoices
 
   (
+    sleep 30
     cd /app/whatsapp-bridge
+    echo "Starting WhatsApp bridge..."
     node server.js >> /app/whatsapp-bridge/bridge.log 2>&1
   ) &
-  echo $! >/tmp/whatsapp-bridge.pid
-  echo "WhatsApp bridge PID $(cat /tmp/whatsapp-bridge.pid)"
 }
 
 start_bridge_background

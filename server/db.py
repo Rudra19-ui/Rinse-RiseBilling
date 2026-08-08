@@ -241,7 +241,11 @@ def get_connection() -> Iterator[DbConnection]:
         import psycopg2
         from psycopg2.extras import RealDictCursor
 
-        conn = psycopg2.connect(_postgres_url(), cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(
+            _postgres_url(),
+            cursor_factory=RealDictCursor,
+            connect_timeout=10,
+        )
         wrapper = DbConnection(conn, True)
         try:
             yield wrapper
