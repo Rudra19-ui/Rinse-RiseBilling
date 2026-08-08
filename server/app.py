@@ -13,7 +13,7 @@ load_dotenv(ROOT / ".env")
 
 from werkzeug.exceptions import HTTPException
 
-from db import get_connection
+from db import get_connection, is_postgres
 
 from database import (
     build_customer_profile,
@@ -110,12 +110,26 @@ def health():
         db_ok = True
     except Exception as exc:
         db_error = str(exc)
+    fix_steps: list[str] = []
+    if not db_ok and is_postgres():
+        fix_steps = [
+            "Open Rinse-RiseBilling → Variables → remove any old manual DATABASE_URL",
+            "Add Variable Reference: PostgreSQL service → DATABASE_PRIVATE_URL → name it DATABASE_URL",
+            "If that fails, also add DATABASE_PUBLIC_URL from the Postgres service",
+            "Redeploy Rinse-RiseBilling and check /api/health for dbOk: true",
+        ]
+        if db_error and "railway.internal" in db_error:
+            fix_steps.insert(
+                0,
+                "DATABASE_URL points to postgres.railway.internal but this service cannot reach Postgres — re-link using Variable Reference (do not paste an old copied URL).",
+            )
     return jsonify(
         {
             "ok": True,
             **config,
             "dbOk": db_ok,
             "dbError": db_error,
+            "fixSteps": fix_steps or config.get("fixSteps"),
             "whatsappEnabled": wa_on,
             "whatsappAvailable": wa_available,
             "hosted": is_cloud_deployment(),

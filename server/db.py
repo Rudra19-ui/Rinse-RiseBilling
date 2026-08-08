@@ -49,24 +49,33 @@ def _build_url_from_parts(host: str, port: str, user: str, password: str, databa
     )
 
 
-def _resolve_database_url() -> str:
+def _collect_postgres_urls() -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
     for key in PG_ENV_KEYS:
         value = os.environ.get(key, "").strip()
         if value.startswith(("postgres://", "postgresql://")):
-            return _normalize_postgres_url(value)
-
-    for host_key, port_key, user_key, pass_key, db_key in PG_PARTS_KEYS:
+            normalized = _normalize_postgres_url(value)
+            if normalized not in seen:
+                seen.add(normalized)
+                urls.append(normalized)
+    for parts in PG_PARTS_KEYS:
         url = _build_url_from_parts(
-            os.environ.get(host_key, ""),
-            os.environ.get(port_key, ""),
-            os.environ.get(user_key, ""),
-            os.environ.get(pass_key, ""),
-            os.environ.get(db_key, ""),
+            os.environ.get(parts[0], ""),
+            os.environ.get(parts[1], ""),
+            os.environ.get(parts[2], ""),
+            os.environ.get(parts[3], ""),
+            os.environ.get(parts[4], ""),
         )
-        if url:
-            return url
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
 
-    return ""
+
+def _resolve_database_url() -> str:
+    urls = _collect_postgres_urls()
+    return urls[0] if urls else ""
 
 
 def _postgres_env_diagnostics() -> dict[str, str]:
@@ -235,30 +244,41 @@ class DbConnection:
         return {row["name"] for row in rows}
 
 
+def _postgres_connect_url(url: str) -> str:
+    if "sslmode=" not in url and "railway.internal" not in url:
+        url += "&sslmode=require" if "?" in url else "?sslmode=require"
+    return url
+
+
 @contextmanager
 def get_connection() -> Iterator[DbConnection]:
     if is_postgres():
         import psycopg2
         from psycopg2.extras import RealDictCursor
 
-        url = _postgres_url()
-        if "sslmode=" not in url and "railway.internal" not in url:
-            url += "&sslmode=require" if "?" in url else "?sslmode=require"
-
-        conn = psycopg2.connect(
-            url,
-            cursor_factory=RealDictCursor,
-            connect_timeout=10,
-        )
-        wrapper = DbConnection(conn, True)
-        try:
-            yield wrapper
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        urls = [_postgres_connect_url(u) for u in _collect_postgres_urls()]
+        last_error: Exception | None = None
+        for url in urls:
+            try:
+                conn = psycopg2.connect(
+                    url,
+                    cursor_factory=RealDictCursor,
+                    connect_timeout=10,
+                )
+                wrapper = DbConnection(conn, True)
+                try:
+                    yield wrapper
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    conn.close()
+                return
+            except Exception as exc:
+                last_error = exc
+                continue
+        raise last_error or RuntimeError("No PostgreSQL connection URL available")
     else:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         raw = sqlite3.connect(DB_PATH)
