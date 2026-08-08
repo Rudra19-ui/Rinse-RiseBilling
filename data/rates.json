@@ -1,0 +1,1532 @@
+{
+  "businessName": "Rinse & Rise Laundryrite",
+  "services": [
+    {
+      "id": "steam-iron",
+      "name": "Steam Iron",
+      "categories": [
+        {
+          "name": "MEN",
+          "items": [
+            {
+              "name": "Shirt",
+              "rate": 15.0
+            },
+            {
+              "name": "shirt silk",
+              "rate": 15.0
+            },
+            {
+              "name": "shirt woolen",
+              "rate": 15.0
+            },
+            {
+              "name": "T Shirt",
+              "rate": 15.0
+            },
+            {
+              "name": "Pant",
+              "rate": 15.0
+            },
+            {
+              "name": "Jeans",
+              "rate": 15.0
+            },
+            {
+              "name": "Coat",
+              "rate": 70.0
+            },
+            {
+              "name": "Waist Coat",
+              "rate": 30.0
+            },
+            {
+              "name": "Long Coat",
+              "rate": 105.0
+            },
+            {
+              "name": "Jacket (Half Sleeve)",
+              "rate": 70.0
+            },
+            {
+              "name": "Jacket (Full Sleeve)",
+              "rate": 50.0
+            },
+            {
+              "name": "Jacket (With Food)",
+              "rate": 80.0
+            },
+            {
+              "name": "Leather Jacket",
+              "rate": 110.0
+            },
+            {
+              "name": "Sweat Shirt",
+              "rate": 160.0
+            },
+            {
+              "name": "Sweat Shirt with hood",
+              "rate": 80.0
+            },
+            {
+              "name": "Sweater Full Sleeves Pain",
+              "rate": 50.0
+            },
+            {
+              "name": "Sweater Full Sleeves Heavy",
+              "rate": 70.0
+            },
+            {
+              "name": "Sweater Half",
+              "rate": 40.0
+            },
+            {
+              "name": "long pull over",
+              "rate": 50.0
+            },
+            {
+              "name": "kurta",
+              "rate": 30.0
+            },
+            {
+              "name": "kurta heavy",
+              "rate": 40.0
+            },
+            {
+              "name": "Dhoti",
+              "rate": 40.0
+            },
+            {
+              "name": "Safari Suit coat",
+              "rate": 80.0
+            },
+            {
+              "name": "Achkan",
+              "rate": 100.0
+            },
+            {
+              "name": "Safari Suit pant",
+              "rate": 20.0
+            },
+            {
+              "name": "Shorts",
+              "rate": 20.0
+            },
+            {
+              "name": "Pyjama",
+              "rate": 15.0
+            },
+            {
+              "name": "Capri",
+              "rate": 15.0
+            },
+            {
+              "name": "Sweat pants",
+              "rate": 30.0
+            },
+            {
+              "name": "Track Pant",
+              "rate": 20.0
+            },
+            {
+              "name": "Swimming Costumes",
+              "rate": 15.0
+            },
+            {
+              "name": "Underwear",
+              "rate": 15.0
+            },
+            {
+              "name": "Vest",
+              "rate": 15.0
+            }
+          ]
+        },
+        {
+          "name": "WOMEN",
+          "items": [
+            {
+              "name": "Kurta Plain",
+              "rate": 40.0
+            },
+            {
+              "name": "Kurta Heavy",
+              "rate": 60.0
+            },
+            {
+              "name": "Kurta very heavy",
+              "rate": 80.0
+            },
+            {
+              "name": "Salwar plain",
+              "rate": 20.0
+            },
+            {
+              "name": "Salwar heavy",
+              "rate": 40.0
+            },
+            {
+              "name": "Plazzo plain",
+              "rate": 30.0
+            },
+            {
+              "name": "Plazzo very heavy",
+              "rate": 40.0
+            },
+            {
+              "name": "Dupatta plain",
+              "rate": 20.0
+            },
+            {
+              "name": "Dupatta heavy",
+              "rate": 35.0
+            },
+            {
+              "name": "Dupatta very heavy",
+              "rate": 45.0
+            },
+            {
+              "name": "Saree plain",
+              "rate": 60.0
+            },
+            {
+              "name": "Saree heavy",
+              "rate": 80.0
+            },
+            {
+              "name": "Saree very heavy",
+              "rate": 110.0
+            },
+            {
+              "name": "Petticoat",
+              "rate": 20.0
+            },
+            {
+              "name": "Blouse plain",
+              "rate": 20.0
+            },
+            {
+              "name": "Blouse heavy",
+              "rate": 40.0
+            },
+            {
+              "name": "Blouse very heavy",
+              "rate": 50.0
+            },
+            {
+              "name": "Dress plain",
+              "rate": 60.0
+            },
+            {
+              "name": "Dress heavy",
+              "rate": 70.0
+            },
+            {
+              "name": "Dress very heavy",
+              "rate": 80.0
+            },
+            {
+              "name": "Lehnga Plain",
+              "rate": 130.0
+            },
+            {
+              "name": "Lehnga Heavy",
+              "rate": 180.0
+            },
+            {
+              "name": "Lehnga Very Heavy",
+              "rate": 230.0
+            },
+            {
+              "name": "Bridal Lehnga Blouse",
+              "rate": 60.0
+            },
+            {
+              "name": "Skirt Short Plain",
+              "rate": 35.0
+            },
+            {
+              "name": "Skirt Short Heavy",
+              "rate": 45.0
+            },
+            {
+              "name": "Skirt Short Very Heavy",
+              "rate": 55.0
+            },
+            {
+              "name": "Skirt Long Plain",
+              "rate": 45.0
+            },
+            {
+              "name": "Skirt Long Heavy",
+              "rate": 55.0
+            },
+            {
+              "name": "Skirt Long Very Heavy",
+              "rate": 65.0
+            },
+            {
+              "name": "Top Plain",
+              "rate": 15.0
+            },
+            {
+              "name": "Top Very Heavy",
+              "rate": 25.0
+            },
+            {
+              "name": "Shirt",
+              "rate": 15.0
+            },
+            {
+              "name": "T Shirt",
+              "rate": 15.0
+            },
+            {
+              "name": "Pants",
+              "rate": 15.0
+            },
+            {
+              "name": "Jeans",
+              "rate": 20.0
+            },
+            {
+              "name": "Jumper",
+              "rate": 20.0
+            },
+            {
+              "name": "Dangree",
+              "rate": 30.0
+            },
+            {
+              "name": "Legging",
+              "rate": 20.0
+            },
+            {
+              "name": "Capri",
+              "rate": 15.0
+            },
+            {
+              "name": "Slacks",
+              "rate": 30.0
+            },
+            {
+              "name": "Stole Heavy",
+              "rate": 35.0
+            },
+            {
+              "name": "Stole Plain",
+              "rate": 20.0
+            },
+            {
+              "name": "Stole Very Heavy",
+              "rate": 45.0
+            },
+            {
+              "name": "Shawl Plain",
+              "rate": 30.0
+            },
+            {
+              "name": "Shawl Heavy",
+              "rate": 35.0
+            },
+            {
+              "name": "Shawl Very Heavy",
+              "rate": 45.0
+            },
+            {
+              "name": "Scarf",
+              "rate": 15.0
+            },
+            {
+              "name": "Coat",
+              "rate": 70.0
+            },
+            {
+              "name": "Long Coat",
+              "rate": 100.0
+            },
+            {
+              "name": "Jacket Full Sleeves",
+              "rate": 60.0
+            },
+            {
+              "name": "Jacket Half  Sleeves",
+              "rate": 40.0
+            },
+            {
+              "name": "Sweat Shirt With Hood",
+              "rate": 60.0
+            },
+            {
+              "name": "Sweater Full Sleeves Plain",
+              "rate": 45.0
+            },
+            {
+              "name": "Sweater Ful Sleeves Heavy",
+              "rate": 55.0
+            },
+            {
+              "name": "Sweater Half Sleeves Plain",
+              "rate": 25.0
+            },
+            {
+              "name": "Sweater Half Sleeves Heavy",
+              "rate": 35.0
+            },
+            {
+              "name": "Long Pullover",
+              "rate": 60.0
+            },
+            {
+              "name": "Stocking",
+              "rate": 35.0
+            },
+            {
+              "name": "Truck Pant",
+              "rate": 20.0
+            },
+            {
+              "name": "Brassieres",
+              "rate": 15.0
+            }
+          ]
+        },
+        {
+          "name": "KIDS",
+          "items": [
+            {
+              "name": "Shirt",
+              "rate": 12.0
+            },
+            {
+              "name": "Shirt Woolen",
+              "rate": 15.0
+            },
+            {
+              "name": "T Shirt",
+              "rate": 12.0
+            },
+            {
+              "name": "Top Plain",
+              "rate": 12.0
+            },
+            {
+              "name": "Top Heavy",
+              "rate": 15.0
+            },
+            {
+              "name": "Pants",
+              "rate": 12.0
+            },
+            {
+              "name": "Jeans",
+              "rate": 15.0
+            },
+            {
+              "name": "Capri",
+              "rate": 12.0
+            },
+            {
+              "name": "Shorts",
+              "rate": 12.0
+            },
+            {
+              "name": "Jumper",
+              "rate": 15.0
+            },
+            {
+              "name": "Dangree",
+              "rate": 20.0
+            },
+            {
+              "name": "Frock Plain",
+              "rate": 30.0
+            },
+            {
+              "name": "Frock Heavy",
+              "rate": 40.0
+            },
+            {
+              "name": "Frock Very Heavy",
+              "rate": 50.0
+            },
+            {
+              "name": "Dress Plain",
+              "rate": 50.0
+            },
+            {
+              "name": "Dress Heavy",
+              "rate": 60.0
+            },
+            {
+              "name": "Dress Very Heavy",
+              "rate": 70.0
+            },
+            {
+              "name": "Sherwani",
+              "rate": 80.0
+            },
+            {
+              "name": "Kurta Plain",
+              "rate": 15.0
+            },
+            {
+              "name": "Kurta Very Heavy",
+              "rate": 25.0
+            },
+            {
+              "name": "Salwar Heavy",
+              "rate": 20.0
+            },
+            {
+              "name": "Dupatta",
+              "rate": 15.0
+            },
+            {
+              "name": "Dupatta Heavy",
+              "rate": 20.0
+            },
+            {
+              "name": "Dupatta Very Heavy",
+              "rate": 25.0
+            },
+            {
+              "name": "Blouse",
+              "rate": 15.0
+            },
+            {
+              "name": "Blouse Heavy",
+              "rate": 20.0
+            },
+            {
+              "name": "Lehnga Plain",
+              "rate": 100.0
+            },
+            {
+              "name": "Lehnga Heavy",
+              "rate": 120.0
+            },
+            {
+              "name": "Coat",
+              "rate": 40.0
+            },
+            {
+              "name": "Waist Coat",
+              "rate": 15.0
+            },
+            {
+              "name": "Long Coat",
+              "rate": 35.0
+            },
+            {
+              "name": "Long Pullover",
+              "rate": 60.0
+            },
+            {
+              "name": "Jacket Full Sleeves",
+              "rate": 35.0
+            },
+            {
+              "name": "Jacket Half Sleeves",
+              "rate": 25.0
+            },
+            {
+              "name": "Jacket With Hood",
+              "rate": 55.0
+            },
+            {
+              "name": "Sweater Full Sleeves Heavy",
+              "rate": 35.0
+            },
+            {
+              "name": "Sweater Full Sleeves Plain",
+              "rate": 25.0
+            },
+            {
+              "name": "Sweater Half Sleeves Heavy",
+              "rate": 30.0
+            },
+            {
+              "name": "Sweater Half Sleeves Plain",
+              "rate": 20.0
+            },
+            {
+              "name": "Sweat Shirt",
+              "rate": 15.0
+            },
+            {
+              "name": "Sweat Shirt With Hood",
+              "rate": 25.0
+            },
+            {
+              "name": "Swimming Costume",
+              "rate": 10.0
+            },
+            {
+              "name": "Legging",
+              "rate": 12.0
+            },
+            {
+              "name": "Track Pant",
+              "rate": 15.0
+            },
+            {
+              "name": "Baby Blanket",
+              "rate": 50.0
+            }
+          ]
+        },
+        {
+          "name": "OTHERS",
+          "items": [
+            {
+              "name": "Handkerchief",
+              "rate": 7.0
+            },
+            {
+              "name": "Bath Robe",
+              "rate": 30.0
+            },
+            {
+              "name": "Muffer",
+              "rate": 20.0
+            },
+            {
+              "name": "Tie",
+              "rate": 10.0
+            },
+            {
+              "name": "Face Mask",
+              "rate": 10.0
+            },
+            {
+              "name": "Bed Sheet Single",
+              "rate": 30.0
+            },
+            {
+              "name": "Bed Sheet Double",
+              "rate": 40.0
+            },
+            {
+              "name": "Pillow Cover",
+              "rate": 15.0
+            },
+            {
+              "name": "Curtain Door 7/4 ft",
+              "rate": 100.0
+            },
+            {
+              "name": "Curtain Window 4/4ft",
+              "rate": 80.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dry-clean",
+      "name": "Dry Clean",
+      "categories": [
+        {
+          "name": "MEN",
+          "items": [
+            {
+              "name": "Shirt",
+              "rate": 130.0
+            },
+            {
+              "name": "shirt silk",
+              "rate": 160.0
+            },
+            {
+              "name": "shirt woolen",
+              "rate": 160.0
+            },
+            {
+              "name": "T Shirt",
+              "rate": 130.0
+            },
+            {
+              "name": "Pant",
+              "rate": 130.0
+            },
+            {
+              "name": "Jeans",
+              "rate": 140.0
+            },
+            {
+              "name": "Coat",
+              "rate": 270.0
+            },
+            {
+              "name": "Waist Coat",
+              "rate": 180.0
+            },
+            {
+              "name": "Long Coat",
+              "rate": 310.0
+            },
+            {
+              "name": "Jacket (Half Sleeve)",
+              "rate": 180.0
+            },
+            {
+              "name": "Jacket (Full Sleeve)",
+              "rate": 280.0
+            },
+            {
+              "name": "Jacket (With Hood)",
+              "rate": 280.0
+            },
+            {
+              "name": "Leather Jacket",
+              "rate": 480.0
+            },
+            {
+              "name": "Sweat Shirt",
+              "rate": 170.0
+            },
+            {
+              "name": "Sweat Shirt with hood",
+              "rate": 200.0
+            },
+            {
+              "name": "Sweater Full Sleeves Pain",
+              "rate": 180.0
+            },
+            {
+              "name": "Sweater Full Sleeves Heavy",
+              "rate": 220.0
+            },
+            {
+              "name": "Sweater Half",
+              "rate": 160.0
+            },
+            {
+              "name": "long pull over",
+              "rate": 310.0
+            },
+            {
+              "name": "kurta",
+              "rate": 160.0
+            },
+            {
+              "name": "kurta heavy",
+              "rate": 190.0
+            },
+            {
+              "name": "Dhoti",
+              "rate": 160.0
+            },
+            {
+              "name": "Safari Suit coat",
+              "rate": 310.0
+            },
+            {
+              "name": "Achkan",
+              "rate": 310.0
+            },
+            {
+              "name": "Safari Suit pant",
+              "rate": 150.0
+            },
+            {
+              "name": "Shorts",
+              "rate": 130.0
+            },
+            {
+              "name": "Pyjama",
+              "rate": 130.0
+            },
+            {
+              "name": "Capri",
+              "rate": 130.0
+            },
+            {
+              "name": "Sweat pants",
+              "rate": 130.0
+            },
+            {
+              "name": "Track Pant",
+              "rate": 130.0
+            },
+            {
+              "name": "Swimming Costumes",
+              "rate": 200.0
+            },
+            {
+              "name": "Underwear",
+              "rate": 60.0
+            },
+            {
+              "name": "Vest",
+              "rate": 60.0
+            }
+          ]
+        },
+        {
+          "name": "WOMEN",
+          "items": [
+            {
+              "name": "Kurta Plain",
+              "rate": 140.0
+            },
+            {
+              "name": "Kurta Heavy",
+              "rate": 180.0
+            },
+            {
+              "name": "Kurta very heavy",
+              "rate": 280.0
+            },
+            {
+              "name": "Salwar plain",
+              "rate": 110.0
+            },
+            {
+              "name": "Salwar heavy",
+              "rate": 130.0
+            },
+            {
+              "name": "Plazzo plain",
+              "rate": 150.0
+            },
+            {
+              "name": "Plazzo very heavy",
+              "rate": 180.0
+            },
+            {
+              "name": "Dupatta plain",
+              "rate": 90.0
+            },
+            {
+              "name": "Dupatta heavy",
+              "rate": 120.0
+            },
+            {
+              "name": "Dupatta very heavy",
+              "rate": 150.0
+            },
+            {
+              "name": "Saree plain",
+              "rate": 250.0
+            },
+            {
+              "name": "Saree heavy",
+              "rate": 350.0
+            },
+            {
+              "name": "Saree very heavy",
+              "rate": 450.0
+            },
+            {
+              "name": "Petticoat",
+              "rate": 130.0
+            },
+            {
+              "name": "Blouse plain",
+              "rate": 70.0
+            },
+            {
+              "name": "Blouse heavy",
+              "rate": 110.0
+            },
+            {
+              "name": "Blouse very heavy",
+              "rate": 150.0
+            },
+            {
+              "name": "Dress plain",
+              "rate": 250.0
+            },
+            {
+              "name": "Dress heavy",
+              "rate": 280.0
+            },
+            {
+              "name": "Dress very heavy",
+              "rate": 350.0
+            },
+            {
+              "name": "Lehnga Plain",
+              "rate": 500.0
+            },
+            {
+              "name": "Lehnga Heavy",
+              "rate": 750.0
+            },
+            {
+              "name": "Lehnga Very Heavy",
+              "rate": 950.0
+            },
+            {
+              "name": "Bridal Lehnga Blouse",
+              "rate": 150.0
+            },
+            {
+              "name": "Skirt Short Plain",
+              "rate": 180.0
+            },
+            {
+              "name": "Skirt Short Heavy",
+              "rate": 220.0
+            },
+            {
+              "name": "Skirt Short Very Heavy",
+              "rate": 280.0
+            },
+            {
+              "name": "Skirt Long Plain",
+              "rate": 220.0
+            },
+            {
+              "name": "Skirt Long Heavy",
+              "rate": 280.0
+            },
+            {
+              "name": "Skirt Long Very Heavy",
+              "rate": 350.0
+            },
+            {
+              "name": "Top Plain",
+              "rate": 130.0
+            },
+            {
+              "name": "Top Very Heavy",
+              "rate": 180.0
+            },
+            {
+              "name": "Shirt",
+              "rate": 130.0
+            },
+            {
+              "name": "T Shirt",
+              "rate": 130.0
+            },
+            {
+              "name": "Pants",
+              "rate": 130.0
+            },
+            {
+              "name": "Jeans",
+              "rate": 140.0
+            },
+            {
+              "name": "Jumper",
+              "rate": 150.0
+            },
+            {
+              "name": "Dangree",
+              "rate": 210.0
+            },
+            {
+              "name": "Legging",
+              "rate": 130.0
+            },
+            {
+              "name": "Capri",
+              "rate": 130.0
+            },
+            {
+              "name": "Slacks",
+              "rate": 130.0
+            },
+            {
+              "name": "Stole Plain",
+              "rate": 130.0
+            },
+            {
+              "name": "Stole Heavy",
+              "rate": 160.0
+            },
+            {
+              "name": "Stole Very Heavy",
+              "rate": 180.0
+            },
+            {
+              "name": "Shawl Plain",
+              "rate": 140.0
+            },
+            {
+              "name": "Shawl Heavy",
+              "rate": 160.0
+            },
+            {
+              "name": "Shawl Very Heavy",
+              "rate": 180.0
+            },
+            {
+              "name": "Scarf",
+              "rate": 110.0
+            },
+            {
+              "name": "Coat",
+              "rate": 200.0
+            },
+            {
+              "name": "Long Coat",
+              "rate": 310.0
+            },
+            {
+              "name": "Jacket Full Sleeves",
+              "rate": 280.0
+            },
+            {
+              "name": "Jacket Half  Sleeves",
+              "rate": 180.0
+            },
+            {
+              "name": "Jacket With Sleeves",
+              "rate": 280.0
+            },
+            {
+              "name": "Sweat Shirt With Hood",
+              "rate": 200.0
+            },
+            {
+              "name": "Sweater Full Sleeves Plain",
+              "rate": 180.0
+            },
+            {
+              "name": "Sweater Ful Sleeves Heavy",
+              "rate": 220.0
+            },
+            {
+              "name": "Sweater Half Sleeves Plain",
+              "rate": 180.0
+            },
+            {
+              "name": "Sweater Half Sleeves Heavy",
+              "rate": 220.0
+            },
+            {
+              "name": "Long Pullover",
+              "rate": 310.0
+            },
+            {
+              "name": "Stocking",
+              "rate": 130.0
+            },
+            {
+              "name": "Truck Pant",
+              "rate": 130.0
+            },
+            {
+              "name": "Brassieres",
+              "rate": 60.0
+            }
+          ]
+        },
+        {
+          "name": "KIDS",
+          "items": [
+            {
+              "name": "Shirt",
+              "rate": 100.0
+            },
+            {
+              "name": "Shirt Woolen",
+              "rate": 120.0
+            },
+            {
+              "name": "T Shirt",
+              "rate": 100.0
+            },
+            {
+              "name": "Top Plain",
+              "rate": 100.0
+            },
+            {
+              "name": "Top Heavy",
+              "rate": 150.0
+            },
+            {
+              "name": "Pants",
+              "rate": 100.0
+            },
+            {
+              "name": "Jeans",
+              "rate": 110.0
+            },
+            {
+              "name": "Capri",
+              "rate": 110.0
+            },
+            {
+              "name": "Shorts",
+              "rate": 70.0
+            },
+            {
+              "name": "Jumper",
+              "rate": 130.0
+            },
+            {
+              "name": "Dangree",
+              "rate": 140.0
+            },
+            {
+              "name": "Frock Plain",
+              "rate": 130.0
+            },
+            {
+              "name": "Frock Heavy",
+              "rate": 160.0
+            },
+            {
+              "name": "Frock Very Heavy",
+              "rate": 200.0
+            },
+            {
+              "name": "Dress Plain",
+              "rate": 170.0
+            },
+            {
+              "name": "Dress Heavy",
+              "rate": 260.0
+            },
+            {
+              "name": "Dress Very Heavy",
+              "rate": 280.0
+            },
+            {
+              "name": "Sherwani",
+              "rate": 200.0
+            },
+            {
+              "name": "Kurta Plain",
+              "rate": 120.0
+            },
+            {
+              "name": "Kurta Very Heavy",
+              "rate": 160.0
+            },
+            {
+              "name": "Salwar Plain",
+              "rate": 110.0
+            },
+            {
+              "name": "Salwar Heavy",
+              "rate": 160.0
+            },
+            {
+              "name": "Dupatta",
+              "rate": 60.0
+            },
+            {
+              "name": "Dupatta Heavy",
+              "rate": 100.0
+            },
+            {
+              "name": "Dupatta Very Heavy",
+              "rate": 140.0
+            },
+            {
+              "name": "Blouse Plain",
+              "rate": 60.0
+            },
+            {
+              "name": "Blouse Heavy",
+              "rate": 100.0
+            },
+            {
+              "name": "Lehnga Plain",
+              "rate": 400.0
+            },
+            {
+              "name": "Lehnga Heavy",
+              "rate": 500.0
+            },
+            {
+              "name": "Coat",
+              "rate": 180.0
+            },
+            {
+              "name": "Waist Coat",
+              "rate": 90.0
+            },
+            {
+              "name": "Long Coat",
+              "rate": 280.0
+            },
+            {
+              "name": "Long Pullover",
+              "rate": 180.0
+            },
+            {
+              "name": "Jacket Full Sleeves",
+              "rate": 200.0
+            },
+            {
+              "name": "Jacket Half Sleeves",
+              "rate": 160.0
+            },
+            {
+              "name": "Jacket With Hood",
+              "rate": 230.0
+            },
+            {
+              "name": "Sweater Full Sleeves Plain",
+              "rate": 140.0
+            },
+            {
+              "name": "Sweater Full Sleeves Heavy",
+              "rate": 180.0
+            },
+            {
+              "name": "Sweater Half Sleeves Heavy",
+              "rate": 150.0
+            },
+            {
+              "name": "Sweater Half Sleeves Plain",
+              "rate": 120.0
+            },
+            {
+              "name": "Sweat Shirt",
+              "rate": 180.0
+            },
+            {
+              "name": "Sweat Shirt With Hood",
+              "rate": 200.0
+            },
+            {
+              "name": "Swimming Costume",
+              "rate": 40.0
+            },
+            {
+              "name": "Legging",
+              "rate": 120.0
+            },
+            {
+              "name": "Track Pant",
+              "rate": 90.0
+            },
+            {
+              "name": "Baby Blanket",
+              "rate": 250.0
+            }
+          ]
+        },
+        {
+          "name": "HOUSEHOLD",
+          "items": [
+            {
+              "name": "Curtain Door 7/4ft",
+              "rate": 250.0
+            },
+            {
+              "name": "Curtain Door With Lining 7/4ft",
+              "rate": 400.0
+            },
+            {
+              "name": "Curtain Window 4/4 ft",
+              "rate": 200.0
+            },
+            {
+              "name": "Curtain Window With Lining 4/4 ft",
+              "rate": 300.0
+            },
+            {
+              "name": "Curtain Belt",
+              "rate": 140.0
+            },
+            {
+              "name": "Blanket Single",
+              "rate": 380.0
+            },
+            {
+              "name": "Blanket Single 2 ply",
+              "rate": 400.0
+            },
+            {
+              "name": "Blanket Double",
+              "rate": 450.0
+            },
+            {
+              "name": "Blanket Double 2Ply",
+              "rate": 480.0
+            },
+            {
+              "name": "Quilt Single",
+              "rate": 400.0
+            },
+            {
+              "name": "Quilt Double",
+              "rate": 500.0
+            },
+            {
+              "name": "Quilt Cover Single",
+              "rate": 150.0
+            },
+            {
+              "name": "Quilt Cover Double",
+              "rate": 170.0
+            },
+            {
+              "name": "Bed sheet Single",
+              "rate": 150.0
+            },
+            {
+              "name": "Bed sheet Double",
+              "rate": 190.0
+            },
+            {
+              "name": "Sofa Cover Small",
+              "rate": 60.0
+            },
+            {
+              "name": "Sofa Cover Medium",
+              "rate": 110.0
+            },
+            {
+              "name": "Sofa Cover Larg",
+              "rate": 180.0
+            },
+            {
+              "name": "Cushion Covers",
+              "rate": 60.0
+            },
+            {
+              "name": "Cushion Cover Medium",
+              "rate": 110.0
+            },
+            {
+              "name": "Cushion Cover Large",
+              "rate": 180.0
+            },
+            {
+              "name": "Cushion Samll",
+              "rate": 150.0
+            },
+            {
+              "name": "Cushion Medium",
+              "rate": 210.0
+            },
+            {
+              "name": "Cushion Larg",
+              "rate": 300.0
+            },
+            {
+              "name": "Pillow Cover",
+              "rate": 50.0
+            },
+            {
+              "name": "Chair Cover",
+              "rate": 60.0
+            },
+            {
+              "name": "Hand Towel",
+              "rate": 40.0
+            },
+            {
+              "name": "Towel Larg",
+              "rate": 130.0
+            },
+            {
+              "name": "Carpet",
+              "rate": 40.0
+            },
+            {
+              "name": "Table Cloth Small",
+              "rate": 80.0
+            },
+            {
+              "name": "Table Cloth Large",
+              "rate": 160.0
+            },
+            {
+              "name": "Table Mat",
+              "rate": 60.0
+            },
+            {
+              "name": "Foot Mats",
+              "rate": 60.0
+            },
+            {
+              "name": "Mattress Single",
+              "rate": 1000.0
+            },
+            {
+              "name": "Mattress Double",
+              "rate": 2000.0
+            },
+            {
+              "name": "Bed Head",
+              "rate": 1500.0
+            }
+          ]
+        },
+        {
+          "name": "OTHER",
+          "items": [
+            {
+              "name": "Soft Toy Small",
+              "rate": 200.0
+            },
+            {
+              "name": "Soft Toy Medium",
+              "rate": 300.0
+            },
+            {
+              "name": "Soft Toy Large",
+              "rate": 400.0
+            },
+            {
+              "name": "Soft Toy Extra Large",
+              "rate": 500.0
+            },
+            {
+              "name": "Suit Case Medium",
+              "rate": 400.0
+            },
+            {
+              "name": "Suit Case Small",
+              "rate": 250.0
+            },
+            {
+              "name": "Suit Case Large",
+              "rate": 500.0
+            },
+            {
+              "name": "Suit Case Exta Large",
+              "rate": 710.0
+            },
+            {
+              "name": "Handbag Canvass Jute Cloth Based Large",
+              "rate": 410.0
+            },
+            {
+              "name": "Handbag Canvass Jute Cloth Based Small",
+              "rate": 280.0
+            },
+            {
+              "name": "Handbag Leather Small",
+              "rate": 410.0
+            },
+            {
+              "name": "Handbag Leather Large",
+              "rate": 610.0
+            },
+            {
+              "name": "HandKerchief",
+              "rate": 40.0
+            },
+            {
+              "name": "Hat",
+              "rate": 160.0
+            },
+            {
+              "name": "Cap",
+              "rate": 160.0
+            },
+            {
+              "name": "Muffler",
+              "rate": 110.0
+            },
+            {
+              "name": "Rain Cost",
+              "rate": 180.0
+            },
+            {
+              "name": "Tie",
+              "rate": 50.0
+            },
+            {
+              "name": "Bath Robe",
+              "rate": 180.0
+            },
+            {
+              "name": "Belt",
+              "rate": 180.0
+            },
+            {
+              "name": "Wallet",
+              "rate": 160.0
+            },
+            {
+              "name": "Car Seat Cover",
+              "rate": 180.0
+            },
+            {
+              "name": "Gloves",
+              "rate": 70.0
+            },
+            {
+              "name": "Socks",
+              "rate": 70.0
+            },
+            {
+              "name": "Face Mask",
+              "rate": 60.0
+            },
+            {
+              "name": "Seat Cover",
+              "rate": 60.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "laundry",
+      "name": "Lundry",
+      "categories": [
+        {
+          "name": "Laundry Service",
+          "items": [
+            {
+              "name": "Wash and Fold 80/kg",
+              "rate": 80.0
+            },
+            {
+              "name": "Wash and Iron 125/kg",
+              "rate": 125.0
+            },
+            {
+              "name": "Premium Laundry 200/kg",
+              "rate": 200.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shoe-cleaning",
+      "name": "Shoe Cleaning",
+      "categories": [
+        {
+          "name": "Shoes",
+          "items": [
+            {
+              "name": "Sport Shoes",
+              "rate": 350.0
+            },
+            {
+              "name": "Canvass Shoes",
+              "rate": 350.0
+            },
+            {
+              "name": "Leather Shoes",
+              "rate": 480.0
+            },
+            {
+              "name": "Suede Leather",
+              "rate": 510.0
+            },
+            {
+              "name": "Sandals",
+              "rate": 310.0
+            },
+            {
+              "name": "Slippers",
+              "rate": 210.0
+            },
+            {
+              "name": "Boots",
+              "rate": 700.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

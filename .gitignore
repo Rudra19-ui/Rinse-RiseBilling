@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+
+# Local database & generated files
+data/rinse_rise.db
+data/invoices/
+*.pdf
+
+# Node / WhatsApp bridge
+whatsapp-bridge/node_modules/
+whatsapp-bridge/.wwebjs_auth/
+whatsapp-bridge/.wwebjs_cache/
+whatsapp-bridge/bridge.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

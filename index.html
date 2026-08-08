@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rinse & Rise — Laundry Billing</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app">
+    <!-- Brand Header -->
+    <header class="header">
+      <div class="header-inner">
+        <div class="brand">
+          <img src="assets/logo.png" alt="Rinse & Rise" class="brand-logo">
+          <div class="brand-text">
+            <h1>RINSE &amp; RISE</h1>
+            <span class="brand-tag">LAUNDRYRITE</span>
+            <span class="brand-motto">Rinse · Rise · Repeat</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div class="bill-meta">
+            <span class="bill-badge" id="billNo">Bill #0001</span>
+            <span id="billDate"></span>
+          </div>
+          <button type="button" class="btn btn-history" id="expenditureBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Expenditure
+          </button>
+          <button type="button" class="btn btn-history" id="historyBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            History
+          </button>
+          <button type="button" class="wa-status-pill" id="whatsappStatusPill" data-state="offline" title="WhatsApp connection status">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z"/></svg>
+            <span class="wa-pill-label">WhatsApp</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Billing View -->
+    <div id="billingView" class="billing-view">
+    <!-- Info Bar -->
+    <div class="info-bar">
+      <div class="info-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        Free Pickup &amp; Delivery
+      </div>
+      <div class="info-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        7 KM Radius
+      </div>
+      <div class="info-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Express 24-Hr Delivery
+      </div>
+    </div>
+
+    <main class="main">
+      <div class="workspace-left">
+      <!-- Customer -->
+      <section class="panel panel-customer">
+        <div class="panel-head">
+          <span class="panel-icon">👤</span>
+          <h2>Customer Details</h2>
+        </div>
+        <div class="form-row">
+          <label>
+            <span class="field-label">Customer Name <span class="required-mark">*</span></span>
+            <input type="text" id="customerName" placeholder="Enter customer name" autocomplete="name" required>
+          </label>
+          <label class="phone-label">
+            <span class="field-label field-label-row">
+              <span>Phone Number <span class="required-mark">*</span></span>
+              <span class="phone-field-actions">
+                <button type="button" class="btn-favorite" id="customerFavoriteBtn" title="Mark as regular customer" disabled aria-label="Mark as regular customer" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                </button>
+                <button type="button" class="btn-info" id="customerInfoBtn" title="View customer profile &amp; charts" disabled aria-label="View customer statistics">i</button>
+              </span>
+            </span>
+            <input type="tel" id="customerPhone" placeholder="10-digit mobile" autocomplete="tel" required minlength="10">
+            <span class="regular-customer-badge hidden" id="customerRegularBadge">★ Regular Customer</span>
+            <span class="profile-hint hidden" id="customerProfileHint"></span>
+          </label>
+        </div>
+        <div class="service-mode-section">
+          <div class="service-mode-group">
+            <p class="service-mode-title">🏠 Home Delivery</p>
+            <p class="service-mode-hint">Pickup or delivery at customer&apos;s door — cannot mix with the same type in Shop</p>
+            <div class="service-mode-options">
+              <label class="mode-chip">
+                <input type="radio" name="homeServiceMode" value="door-pickup" checked>
+                <span>Door Pickup</span>
+              </label>
+              <label class="mode-chip">
+                <input type="radio" name="homeServiceMode" value="door-delivery">
+                <span>Door Delivery</span>
+              </label>
+              <label class="mode-chip" id="homeBothChip">
+                <input type="radio" name="homeServiceMode" value="door-both">
+                <span>Both</span>
+              </label>
+            </div>
+          </div>
+          <div class="service-mode-group">
+            <p class="service-mode-title">🏪 Customer will come to Shop</p>
+            <p class="service-mode-hint">Optional shop visit — cannot pick the same type as Home Delivery</p>
+            <div class="service-mode-options">
+              <label class="mode-chip">
+                <input type="radio" name="shopServiceMode" value="shop-pickup">
+                <span>Shop Pickup</span>
+              </label>
+              <label class="mode-chip">
+                <input type="radio" name="shopServiceMode" value="shop-delivery">
+                <span>Shop Delivery</span>
+              </label>
+              <label class="mode-chip" id="shopBothChip">
+                <input type="radio" name="shopServiceMode" value="shop-both">
+                <span>Both</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="form-row delivery-fields">
+          <label>
+            Delivery Date
+            <input type="date" id="deliveryDate">
+          </label>
+          <label>
+            Time
+            <select id="deliveryTimeSlot">
+              <option value="">Select time...</option>
+              <option value="morning">Morning</option>
+              <option value="afternoon">Afternoon</option>
+              <option value="evening">Evening</option>
+            </select>
+          </label>
+        </div>
+        <div class="payment-section">
+          <div class="payment-group">
+            <p class="service-mode-title">💳 Payment Type</p>
+            <div class="service-mode-options">
+              <label class="mode-chip">
+                <input type="radio" name="paymentType" value="cash">
+                <span>Cash</span>
+              </label>
+              <label class="mode-chip">
+                <input type="radio" name="paymentType" value="upi">
+                <span>UPI Online</span>
+              </label>
+            </div>
+          </div>
+          <div class="payment-group">
+            <p class="service-mode-title">📋 Payment Info</p>
+            <div class="service-mode-options">
+              <label class="mode-chip">
+                <input type="radio" name="paymentInfo" value="pre-payment">
+                <span>Pre Payment</span>
+              </label>
+              <label class="mode-chip">
+                <input type="radio" name="paymentInfo" value="post-payment">
+                <span>Post Payment</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Services -->
+      <section class="panel panel-services">
+        <div class="panel-head">
+          <span class="panel-icon">🧺</span>
+          <h2>Select Service</h2>
+        </div>
+        <div class="service-tiles" id="serviceTiles">
+          <button type="button" class="service-tile" data-service="laundry" data-tile="laundry">
+            <span class="tile-icon">🫧</span>
+            <span class="tile-label">Laundry</span>
+          </button>
+          <button type="button" class="service-tile" data-service="laundry" data-tile="laundry-iron">
+            <span class="tile-icon">👔</span>
+            <span class="tile-label">Premium Laundry</span>
+          </button>
+          <button type="button" class="service-tile" data-service="dry-clean" data-tile="dry-clean">
+            <span class="tile-icon">🧥</span>
+            <span class="tile-label">Dry Cleaning</span>
+          </button>
+          <button type="button" class="service-tile" data-service="steam-iron" data-tile="steam-iron">
+            <span class="tile-icon">♨️</span>
+            <span class="tile-label">Steam Iron</span>
+          </button>
+          <button type="button" class="service-tile" data-service="shoe-cleaning" data-tile="shoe-cleaning">
+            <span class="tile-icon">👟</span>
+            <span class="tile-label">Shoe Cleaning</span>
+          </button>
+        </div>
+
+        <div class="form-row service-row">
+          <label>
+            Service
+            <select id="serviceSelect">
+              <option value="">Select service...</option>
+            </select>
+          </label>
+          <label>
+            Category
+            <select id="categorySelect" disabled>
+              <option value="">Select category...</option>
+            </select>
+          </label>
+          <label class="search-label">
+            Search Item
+            <input type="text" id="itemSearch" placeholder="Type to search..." disabled>
+          </label>
+        </div>
+        <div id="itemResults" class="item-results hidden"></div>
+        <div class="quick-add" id="quickAdd"></div>
+      </section>
+      </div>
+
+      <div class="workspace-right">
+      <!-- Bill -->
+      <section class="panel panel-bill">
+        <div class="panel-head">
+          <span class="panel-icon">🧾</span>
+          <h2>Current Bill</h2>
+        </div>
+        <div class="bill-delivery-bar">
+          <span class="delivery-label">📦 Delivery</span>
+          <span id="deliveryDisplay">—</span>
+        </div>
+        <div class="bill-table-wrap">
+          <table class="bill-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Item</th>
+                <th>Service</th>
+                <th>Qty / Kg</th>
+                <th>Rate</th>
+                <th>Amount</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="billItems">
+              <tr class="empty-row">
+                <td colspan="7">No items added yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="bill-footer">
+          <div class="bill-summary">
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span id="subtotalAmount">₹0</span>
+            </div>
+            <div class="summary-row discount-row">
+              <label for="discountPercent">Discount</label>
+              <div class="discount-input-wrap">
+                <input type="number" id="discountPercent" min="0" max="100" step="1" value="0" placeholder="0">
+                <span class="discount-suffix">%</span>
+              </div>
+              <span id="discountAmount" class="discount-value">− ₹0</span>
+            </div>
+            <div class="summary-row total-row">
+              <span>Total Amount</span>
+              <strong id="totalAmount">₹0</strong>
+            </div>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn btn-outline" id="clearBtn">Clear Bill</button>
+            <button type="button" class="btn btn-save" id="saveBillBtn" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Save Bill
+            </button>
+            <button type="button" class="btn btn-whatsapp" id="whatsappBtn" disabled>
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z"/></svg>
+              Send on WhatsApp
+            </button>
+            <button type="button" class="btn btn-primary" id="printBtn" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Print Receipt
+            </button>
+          </div>
+        </div>
+      </section>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-contact">
+        <a href="tel:9591506548" class="footer-phone">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+          9591506548
+        </a>
+        <span class="footer-hours">9 AM – 9 PM</span>
+      </div>
+      <p class="footer-address">Shop No 1, Site No 211, 15th Cross, 4th Main, Ananth Nagar Phase 1, Electronic City, Bangalore 560100</p>
+    </footer>
+    </div>
+
+    <!-- History View -->
+    <div id="historyView" class="history-view hidden">
+      <div class="history-toolbar">
+        <div class="history-toolbar-left">
+          <button type="button" class="btn btn-outline" id="backToBillingBtn">← Back to Billing</button>
+          <h2>Bill History</h2>
+          <button type="button" class="btn btn-outline btn-overall" id="overallStatsBtn">Over All</button>
+        </div>
+        <div class="history-toolbar-right">
+          <div class="history-filters" id="historyFilters">
+            <button type="button" class="history-filter active" data-filter="all">All</button>
+            <button type="button" class="history-filter" data-filter="pending">Pending</button>
+            <button type="button" class="history-filter" data-filter="ready">Order Ready</button>
+            <button type="button" class="history-filter" data-filter="done">Done</button>
+          </div>
+          <input type="search" id="historySearch" placeholder="Search bill no, name, phone..." class="history-search">
+          <span class="history-count" id="historyCount">0 bills</span>
+        </div>
+      </div>
+      <div class="history-period-bar">
+        <div class="history-period-filters" id="historyPeriodFilters">
+          <button type="button" class="history-period-filter active" data-period="today">Today</button>
+          <button type="button" class="history-period-filter" data-period="week">This Week</button>
+          <button type="button" class="history-period-filter" data-period="month">This Month</button>
+          <button type="button" class="history-period-filter" data-period="year">This Year</button>
+          <button type="button" class="history-period-filter" data-period="all">All</button>
+        </div>
+        <label class="history-date-pick">
+          <span>Calendar</span>
+          <input type="date" id="historyDatePick" title="Pick a specific day">
+        </label>
+        <div class="history-period-bar-right">
+          <div class="history-period-summary" id="historyPeriodSummary">Today's Orders</div>
+          <button type="button" class="btn btn-outline btn-download-excel" id="downloadHistoryExcelBtn" title="Download bills for selected period">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            Download Excel
+          </button>
+        </div>
+      </div>
+      <div class="history-layout">
+        <div class="history-list-panel">
+          <div class="history-list" id="historyList">
+            <p class="history-empty">No bills yet. Complete a bill to see it here.</p>
+          </div>
+        </div>
+        <div class="history-detail-panel">
+          <div class="history-detail" id="historyDetail">
+            <div class="history-detail-placeholder">
+              <span class="panel-icon">📋</span>
+              <p>Select a bill from the list to view full details</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expenditure View -->
+    <div id="expenditureView" class="expenditure-view hidden">
+      <div class="expenditure-toolbar">
+        <div class="expenditure-toolbar-left">
+          <button type="button" class="btn btn-outline" id="backFromExpenditureBtn">← Back to Billing</button>
+          <h2>Shop Expenditure</h2>
+          <button type="button" class="btn btn-outline btn-calculate" id="calculateProfitBtn">Calculate</button>
+        </div>
+        <div class="expenditure-toolbar-right">
+          <div class="expenditure-date-filter">
+            <label>
+              From
+              <input type="date" id="expenditureDateFrom" aria-label="From date">
+            </label>
+            <label>
+              To
+              <input type="date" id="expenditureDateTo" aria-label="To date">
+            </label>
+          </div>
+          <span class="expenditure-total-badge" id="expenditureTotalBadge">Total: ₹0</span>
+          <span class="expenditure-count" id="expenditureCount">0 entries</span>
+        </div>
+      </div>
+      <div class="expenditure-layout">
+        <section class="panel expenditure-form-panel">
+          <div class="panel-head">
+            <span class="panel-icon">💸</span>
+            <h2>Add Expenditure</h2>
+          </div>
+          <form id="expenditureForm" class="expenditure-form">
+            <label>
+              What was the expenditure?
+              <input type="text" id="expenditureName" placeholder="e.g. Detergent, Electricity, Rent..." required autocomplete="off">
+            </label>
+            <label>
+              Date
+              <input type="date" id="expenditureDate" required>
+            </label>
+            <label>
+              Amount (₹)
+              <input type="number" id="expenditureAmount" placeholder="0" min="1" step="1" required>
+            </label>
+            <button type="submit" class="btn btn-primary btn-block">Add Expenditure</button>
+          </form>
+        </section>
+        <section class="panel expenditure-list-panel">
+          <div class="panel-head">
+            <span class="panel-icon">📒</span>
+            <h2>All Expenditures</h2>
+          </div>
+          <div class="expenditure-list-wrap">
+            <div id="expenditureList" class="expenditure-list">
+              <p class="expenditure-empty">No expenditures yet. Add your first entry.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Customer Stats Modal -->
+  <div id="customerStatsModal" class="modal hidden" role="dialog" aria-labelledby="customerStatsTitle">
+    <div class="modal-backdrop" id="customerStatsBackdrop"></div>
+    <div class="modal-content customer-stats-modal">
+      <div class="modal-header">
+        <div>
+          <h3 id="customerStatsTitle">Customer Profile</h3>
+          <p id="customerStatsPhone" class="modal-subtitle"></p>
+          <p id="customerStatsMember" class="modal-member hidden"></p>
+        </div>
+        <button type="button" class="modal-close" id="closeCustomerStats" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="customerStatsBody"></div>
+    </div>
+  </div>
+
+  <!-- Profit & Loss Modal -->
+  <div id="profitLossModal" class="modal hidden" role="dialog" aria-labelledby="profitLossTitle">
+    <div class="modal-backdrop" id="profitLossBackdrop"></div>
+    <div class="modal-content profit-loss-modal">
+      <div class="modal-header">
+        <div>
+          <h3 id="profitLossTitle">Profit &amp; Loss</h3>
+          <p class="modal-subtitle">Shop income vs expenditure</p>
+        </div>
+        <button type="button" class="modal-close" id="closeProfitLoss" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="profitLossBody"></div>
+    </div>
+  </div>
+
+  <!-- Overall Stats Modal -->
+  <div id="overallStatsModal" class="modal hidden" role="dialog" aria-labelledby="overallStatsTitle">
+    <div class="modal-backdrop" id="overallStatsBackdrop"></div>
+    <div class="modal-content overall-stats-modal">
+      <div class="modal-header">
+        <div>
+          <h3 id="overallStatsTitle">Over All Statistics</h3>
+          <p class="modal-subtitle">Total orders &amp; shop performance</p>
+        </div>
+        <button type="button" class="modal-close" id="closeOverallStats" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="overallStatsBody"></div>
+    </div>
+  </div>
+
+  <div id="whatsappToast" class="whatsapp-toast hidden" role="status" aria-live="polite"></div>
+
+  <div id="expenditurePasswordModal" class="modal hidden" role="dialog" aria-labelledby="expenditurePasswordTitle">
+    <div class="modal-backdrop" id="expenditurePasswordBackdrop"></div>
+    <div class="modal-content expenditure-password-modal">
+      <div class="modal-header">
+        <div>
+          <h3 id="expenditurePasswordTitle">Enter Password</h3>
+          <p class="modal-subtitle">Required to open Shop Expenditure</p>
+        </div>
+        <button type="button" class="modal-close" id="closeExpenditurePassword" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="expenditurePasswordForm" class="expenditure-password-form">
+          <label>
+            Password
+            <input type="password" id="expenditurePasswordInput" autocomplete="current-password" required>
+          </label>
+          <p id="expenditurePasswordError" class="expenditure-password-error hidden">Incorrect password. Try again.</p>
+          <div class="expenditure-password-actions">
+            <button type="button" class="btn btn-outline" id="cancelExpenditurePassword">Cancel</button>
+            <button type="submit" class="btn btn-primary">Open</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="whatsappConnectModal" class="modal hidden" role="dialog" aria-labelledby="whatsappConnectTitle">
+    <div class="modal-backdrop" id="whatsappConnectBackdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3 id="whatsappConnectTitle">Connect WhatsApp</h3>
+          <p class="modal-subtitle">Scan once to send invoice PDFs automatically</p>
+        </div>
+        <button type="button" class="modal-close" id="closeWhatsAppConnect" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="whatsappConnectBody"></div>
+    </div>
+  </div>
+
+  <!-- Thermal Receipt -->
+  <div id="receipt" class="receipt">
+    <div class="receipt-header">
+      <h2>RINSE &amp; RISE</h2>
+      <p>LAUNDRYRITE</p>
+      <p class="receipt-tagline">Rinse · Rise · Repeat</p>
+      <p class="receipt-divider">--------------------------------</p>
+    </div>
+    <div class="receipt-info">
+      <p><span>Bill No:</span> <span id="rBillNo"></span></p>
+      <p><span>Date:</span> <span id="rDate"></span></p>
+      <p><span>Name:</span> <span id="rName"></span></p>
+      <p><span>Phone:</span> <span id="rPhone"></span></p>
+      <p><span>Delivery:</span> <span id="rDelivery"></span></p>
+      <p><span>Payment:</span> <span id="rPayment"></span></p>
+    </div>
+    <p class="receipt-divider">--------------------------------</p>
+    <div id="rItems" class="receipt-items"></div>
+    <p class="receipt-divider">--------------------------------</p>
+    <div id="rSummary" class="receipt-summary"></div>
+    <div class="receipt-total">
+      <span>TOTAL</span>
+      <strong id="rTotal"></strong>
+    </div>
+    <p class="receipt-divider">--------------------------------</p>
+    <p class="receipt-thanks">Thank you for choosing us!</p>
+    <p class="receipt-note">Free Pickup &amp; Delivery · 9591506548</p>
+    <p class="receipt-note">9 AM – 9 PM · Express 24-Hr Delivery</p>
+  </div>
+
+  <script src="js/vendor/xlsx.full.min.js"></script>
+  <script src="js/vendor/jspdf.umd.min.js"></script>
+  <script src="js/vendor/jspdf.plugin.autotable.min.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/invoice-pdf.js"></script>
+  <script src="js/history-export.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
