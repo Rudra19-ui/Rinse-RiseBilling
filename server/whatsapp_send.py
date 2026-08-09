@@ -160,8 +160,7 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
         from paths import whatsapp_auth_dir
 
         auth_dir = whatsapp_auth_dir()
-        session_saved = auth_dir.is_dir() and any(auth_dir.glob("**/*"))
-        session_linked = (auth_dir / ".session-linked").is_file() or session_saved
+        session_linked = (auth_dir / ".session-linked").is_file()
         return {
             "available": False,
             "ready": False,
@@ -169,7 +168,7 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
             "lastError": (
                 "Restoring saved WhatsApp session on server — wait 1–3 minutes, then click Retry."
                 if hosted and session_linked
-                else "Scanner is still starting on the server. Wait 1–2 minutes and click Retry."
+                else "Starting WhatsApp scanner — QR code will appear shortly. Wait 1–2 minutes and click Retry."
                 if hosted
                 else None
             ),

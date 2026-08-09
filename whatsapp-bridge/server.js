@@ -36,6 +36,7 @@ const state = {
 
 let authTimer = null;
 let connectPollTimer = null;
+let setupTimer = null;
 let client = null;
 let recovering = false;
 let sendInProgress = false;
@@ -115,6 +116,36 @@ function loadWhatsAppModule() {
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
+function clearSetupTimer() {
+  if (setupTimer) {
+    clearTimeout(setupTimer);
+    setupTimer = null;
+  }
+}
+
+function scheduleFirstConnectQrFallback() {
+  clearSetupTimer();
+  if (isSessionLinked()) return;
+  setupTimer = setTimeout(async () => {
+    if (state.ready || state.qr || isSessionLinked()) return;
+    console.warn("[WhatsApp] No QR yet — clearing incomplete session and retrying for fresh QR…");
+    try {
+      await destroyClient();
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      fs.rmSync(CACHE_DIR, { recursive: true, force: true });
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      state.phase = "starting";
+      state.sessionRestoring = false;
+      state.lastError = null;
+      await initializeClient();
+    } catch (err) {
+      state.phase = "error";
+      state.lastError = err.message || "Could not start WhatsApp scanner.";
+    }
+  }, 90000);
+}
+
 function clearConnectPoll() {
   if (connectPollTimer) {
     clearInterval(connectPollTimer);
@@ -125,6 +156,7 @@ function clearConnectPoll() {
 function markReady(source) {
   clearTimeout(authTimer);
   clearConnectPoll();
+  clearSetupTimer();
   state.qr = null;
   state.lastError = null;
   state.loadingPercent = 100;
@@ -247,14 +279,16 @@ function createClient() {
 
 function bindClientEvents(waClient) {
   waClient.on("qr", async (qr) => {
-    if (isSessionLinked() || hasSavedSession()) {
-      console.log("[WhatsApp] QR skipped — saved session exists, waiting for restore…");
+    clearSetupTimer();
+    if (isSessionLinked()) {
+      console.log("[WhatsApp] QR ignored — session already linked, restoring…");
       state.phase = "restoring";
       state.sessionRestoring = true;
       return;
     }
     state.ready = false;
     state.phase = "qr";
+    state.sessionRestoring = false;
     state.loadingPercent = 0;
     state.lastError = null;
     clearTimeout(authTimer);
@@ -269,8 +303,8 @@ function bindClientEvents(waClient) {
   });
 
   waClient.on("loading_screen", (percent, message) => {
-    state.phase = hasSavedSession() || isSessionLinked() ? "restoring" : "loading";
-    state.sessionRestoring = hasSavedSession() || isSessionLinked();
+    state.phase = isSessionLinked() ? "restoring" : "loading";
+    state.sessionRestoring = isSessionLinked();
     state.loadingPercent = Number(percent) || 0;
     state.qr = null;
     if (message) console.log(`[WhatsApp] Loading ${percent}% — ${message}`);
@@ -390,15 +424,19 @@ async function initializeClient() {
   await destroyClient();
   client = createClient();
   bindClientEvents(client);
-  state.phase = hasSavedSession() || isSessionLinked() ? "restoring" : "starting";
-  state.sessionRestoring = hasSavedSession() || isSessionLinked();
-  state.sessionLinked = isSessionLinked();
-  state.lastError = state.sessionRestoring
+  const linked = isSessionLinked();
+  state.phase = linked ? "restoring" : "starting";
+  state.sessionRestoring = linked;
+  state.sessionLinked = linked;
+  state.lastError = linked
     ? "Restoring saved WhatsApp session — no need to scan again."
-    : null;
+    : "Starting WhatsApp scanner — QR code will appear shortly.";
   state.ready = false;
   state.authenticatingSince = null;
   state.waState = null;
+  if (!linked) {
+    scheduleFirstConnectQrFallback();
+  }
   await client.initialize();
 }
 
@@ -632,12 +670,14 @@ async function bootWhatsApp() {
   acquireSingleInstanceLock();
   ensureAuthDirs();
   state.sessionLinked = isSessionLinked();
-  if (state.sessionLinked || hasSavedSession()) {
+  if (state.sessionLinked) {
     state.phase = "restoring";
     state.sessionRestoring = true;
     state.lastError = "Restoring saved WhatsApp session — no need to scan again.";
   } else {
     state.phase = "starting";
+    state.sessionRestoring = false;
+    state.lastError = "Starting WhatsApp scanner — QR code will appear shortly.";
   }
 
   console.log(`[WhatsApp] Session data: ${AUTH_DIR}`);

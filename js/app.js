@@ -1770,7 +1770,7 @@ async function refreshWhatsAppStatus() {
     const status = await API.getWhatsAppStatus();
     const onHosted = isWhatsAppHosted(status);
     pill.dataset.state = status.ready ? "ready" : status.available ? "waiting" : "offline";
-    const restoring = Boolean(status.sessionLinked || status.sessionRestoring);
+    const restoring = Boolean(status.sessionLinked && (status.sessionRestoring || status.phase === "restoring" || status.phase === "reconnecting"));
     pill.title = status.ready
       ? "WhatsApp connected — invoices send automatically"
       : restoring
@@ -1876,7 +1876,7 @@ function renderWhatsAppConnectBody(status = null) {
     lastRenderedWhatsAppQr = null;
     const hostedHint = hosted
       ? `<p class="wa-connect-hint">The QR scanner runs on this server. First start can take <strong>1–3 minutes</strong> while Chrome loads — keep this window open.</p>
-         <p class="wa-connect-hint">If no QR appears, click <strong>Retry Scanner</strong> and wait again.</p>`
+         <p class="wa-connect-hint">A QR code will appear here — scan it once with your phone to connect WhatsApp.</p>`
       : `<ol class="wa-connect-steps">
           <li>Install <strong>Node.js</strong> from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> if not installed</li>
           <li>Close this page and restart <strong>Start Billing.bat</strong></li>
@@ -1910,11 +1910,24 @@ function renderWhatsAppConnectBody(status = null) {
   }
 
   const sessionLocked = Boolean(status?.sessionLocked || status?.sessionLinked);
-  const restoring = status?.phase === "restoring" || status?.phase === "reconnecting" || status?.sessionRestoring;
+  const restoring = Boolean(status?.sessionLinked && (status?.sessionRestoring || status?.phase === "restoring" || status?.phase === "reconnecting"));
 
   const errorHtml = status?.lastError
     ? `<p class="wa-connect-error">${escapeHtml(status.lastError)}</p>`
     : "";
+
+  if (status?.phase === "starting" && !status?.sessionLinked && !status?.qr) {
+    lastRenderedWhatsAppQr = null;
+    body.innerHTML = `
+      <p class="wa-connect-msg">Starting WhatsApp scanner…</p>
+      <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:15%"></div></div>
+      ${errorHtml}
+      <p class="wa-connect-hint">QR code will appear here in 1–2 minutes. Open WhatsApp on your phone → <strong>Linked Devices</strong> → <strong>Link a Device</strong>, then scan.</p>
+      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Show Fresh QR</button>
+    `;
+    bindWhatsAppResetButton();
+    return;
+  }
 
   if (status?.phase === "loading" || status?.phase === "authenticating" || restoring) {
     lastRenderedWhatsAppQr = null;
