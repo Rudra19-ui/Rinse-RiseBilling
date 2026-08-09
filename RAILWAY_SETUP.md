@@ -8,11 +8,13 @@ Your logs show **sqlite database ready** because the **web service has no Postgr
 
 1. Railway project → click **Rinse-RiseBilling** (web app, not Postgres)
 2. Tab **Variables**
-3. Click **+ New Variable** → **Add Variable Reference**
-4. **Service:** select your **PostgreSQL** service
-5. **Variable:** choose **`DATABASE_PRIVATE_URL`** (best inside Railway) or **`DATABASE_URL`**
-6. **Name on this service:** `DATABASE_URL`
-7. Click **Add** → **Deploy** / **Redeploy** the web service
+3. **Delete** any old manually pasted `DATABASE_URL` (especially if bills/WhatsApp fail with `postgres.railway.internal` error)
+4. Click **+ New Variable** → **Add Variable Reference**
+5. **Service:** select your **PostgreSQL** service
+6. **Variable:** choose **`DATABASE_PRIVATE_URL`** (best inside Railway)
+7. **Name on this service:** `DATABASE_URL`
+8. Click **Add Variable Reference** again for **`DATABASE_PUBLIC_URL`** (backup if private DNS fails)
+9. Click **Deploy** / **Redeploy** the web service
 
 ### Option B — Paste URL manually
 

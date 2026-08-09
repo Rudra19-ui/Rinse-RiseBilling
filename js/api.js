@@ -8,7 +8,12 @@ const API = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      const msg = err.error || `Request failed (${res.status})`;
+      let msg = err.error || `Request failed (${res.status})`;
+      if (res.status === 503 && err.code === "database_unavailable") {
+        msg =
+          err.error ||
+          "Database is not connected on the hosted server. Fix DATABASE_URL in Railway Variables and redeploy.";
+      }
       if (res.status === 404 && path.includes("/send-whatsapp")) {
         throw new Error(
           "WhatsApp send API not found. Please restart Start Billing.bat and refresh the page (Ctrl+F5)."

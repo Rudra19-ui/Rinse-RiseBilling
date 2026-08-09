@@ -50,15 +50,27 @@ def _build_url_from_parts(host: str, port: str, user: str, password: str, databa
 
 
 def _collect_postgres_urls() -> list[str]:
+    """Collect Postgres URLs in best-first order (private internal, then public proxy)."""
+    priority = {
+        "DATABASE_PRIVATE_URL": 0,
+        "DATABASE_URL": 1,
+        "DATABASE_PUBLIC_URL": 2,
+        "POSTGRES_URL": 3,
+        "POSTGRESQL_URL": 4,
+    }
+    ranked: list[tuple[int, int, str]] = []
     seen: set[str] = set()
-    urls: list[str] = []
     for key in PG_ENV_KEYS:
         value = os.environ.get(key, "").strip()
-        if value.startswith(("postgres://", "postgresql://")):
-            normalized = _normalize_postgres_url(value)
-            if normalized not in seen:
-                seen.add(normalized)
-                urls.append(normalized)
+        if not value.startswith(("postgres://", "postgresql://")):
+            continue
+        normalized = _normalize_postgres_url(value)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        host_rank = 0 if "railway.internal" in normalized else 1
+        ranked.append((priority.get(key, 9), host_rank, normalized))
+
     for parts in PG_PARTS_KEYS:
         url = _build_url_from_parts(
             os.environ.get(parts[0], ""),
@@ -69,8 +81,64 @@ def _collect_postgres_urls() -> list[str]:
         )
         if url and url not in seen:
             seen.add(url)
-            urls.append(url)
-    return urls
+            host_rank = 0 if "railway.internal" in url else 1
+            ranked.append((5, host_rank, url))
+
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [url for _, _, url in ranked]
+
+
+_pg_reachable: bool | None = None
+_using_sqlite_fallback = False
+
+
+def _postgres_probe() -> bool:
+    global _pg_reachable
+    if _pg_reachable is not None:
+        return _pg_reachable
+
+    urls = _collect_postgres_urls()
+    if not urls:
+        _pg_reachable = False
+        return False
+
+    try:
+        import psycopg2
+    except ImportError:
+        _pg_reachable = False
+        return False
+
+    for url in urls:
+        try:
+            conn = psycopg2.connect(_postgres_connect_url(url), connect_timeout=5)
+            conn.close()
+            _pg_reachable = True
+            return True
+        except Exception:
+            continue
+
+    _pg_reachable = False
+    return False
+
+
+def postgres_fallback_to_sqlite() -> bool:
+    global _using_sqlite_fallback
+    return _using_sqlite_fallback
+
+
+def _should_use_sqlite_fallback() -> bool:
+    global _using_sqlite_fallback
+    if not is_railway() or not _collect_postgres_urls():
+        _using_sqlite_fallback = False
+        return False
+    if os.environ.get("DATABASE_FALLBACK_SQLITE", "1").lower() in ("0", "false", "no"):
+        _using_sqlite_fallback = False
+        return False
+    if _postgres_probe():
+        _using_sqlite_fallback = False
+        return False
+    _using_sqlite_fallback = True
+    return True
 
 
 def _resolve_database_url() -> str:
@@ -101,7 +169,11 @@ def _postgres_env_diagnostics() -> dict[str, str]:
 
 
 def is_postgres() -> bool:
-    return bool(_resolve_database_url())
+    if not _collect_postgres_urls():
+        return False
+    if _should_use_sqlite_fallback():
+        return False
+    return True
 
 
 def is_railway() -> bool:
@@ -113,14 +185,18 @@ def _postgres_url() -> str:
 
 
 def database_config_status() -> dict[str, Any]:
-    backend = "postgresql" if is_postgres() else "sqlite"
+    has_pg_env = bool(_collect_postgres_urls())
+    using_fallback = _should_use_sqlite_fallback() if has_pg_env else False
+    backend = "sqlite" if using_fallback or not has_pg_env else "postgresql"
     status: dict[str, Any] = {
         "backend": backend,
         "railway": is_railway(),
-        "postgresConfigured": is_postgres(),
+        "postgresConfigured": has_pg_env,
+        "postgresReachable": _postgres_probe() if has_pg_env else False,
+        "sqliteFallback": using_fallback,
         "postgresEnvDiagnostics": _postgres_env_diagnostics(),
     }
-    if is_postgres():
+    if has_pg_env:
         for key in PG_ENV_KEYS:
             if os.environ.get(key, "").strip().startswith(("postgres://", "postgresql://")):
                 status["postgresEnvVar"] = key
@@ -130,6 +206,23 @@ def database_config_status() -> dict[str, Any]:
                 if all(os.environ.get(k, "").strip() for k in parts):
                     status["postgresEnvVar"] = f"{parts[0]}..{parts[-1]}"
                     break
+        if using_fallback:
+            status["warning"] = (
+                "PostgreSQL URL is set but not reachable — using temporary SQLite storage on this server."
+            )
+            status["fixSteps"] = [
+                "Railway → Rinse-RiseBilling → Variables → delete the old manual DATABASE_URL",
+                "Add Variable Reference: PostgreSQL service → DATABASE_PRIVATE_URL → name it DATABASE_URL",
+                "Also add Variable Reference: PostgreSQL → DATABASE_PUBLIC_URL (fallback)",
+                "Redeploy Rinse-RiseBilling — bills will then persist in PostgreSQL",
+            ]
+        elif not _postgres_probe():
+            status["warning"] = "PostgreSQL is configured but connection failed."
+            status["fixSteps"] = [
+                "Re-link DATABASE_URL using Variable Reference from the Postgres service (do not paste an old URL)",
+                "Add DATABASE_PUBLIC_URL from Postgres as a second variable reference",
+                "Redeploy the web service",
+            ]
     elif is_railway():
         status["warning"] = (
             "PostgreSQL is not linked to this service. Fix in Railway dashboard (see RAILWAY_SETUP.md)."

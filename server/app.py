@@ -62,6 +62,20 @@ _DB_API_PREFIXES = (
 )
 
 
+def _friendly_db_error(exc: Exception) -> str:
+    msg = str(exc)
+    if "postgres.railway.internal" in msg and "could not translate host name" in msg.lower():
+        return (
+            "PostgreSQL is not linked correctly on Railway. "
+            "Open Railway → Rinse-RiseBilling → Variables, remove the old DATABASE_URL, "
+            "add a Variable Reference from your Postgres service (DATABASE_PRIVATE_URL), "
+            "then redeploy."
+        )
+    if "Database not ready:" in msg:
+        return msg.replace("Database not ready: ", "", 1)
+    return msg
+
+
 @app.before_request
 def prepare_database():
     if request.method == "OPTIONS":
@@ -71,7 +85,7 @@ def prepare_database():
     try:
         ensure_database()
     except Exception as exc:
-        return jsonify({"error": f"Database not ready: {exc}"}), 503
+        return jsonify({"error": _friendly_db_error(exc), "code": "database_unavailable"}), 503
 
 
 @app.errorhandler(Exception)

@@ -3694,7 +3694,20 @@ async function sendWhatsApp() {
     await shareBillOnWhatsApp(phone, saved);
     resetBillForm();
   } catch (err) {
-    alert("Could not send on WhatsApp: " + err.message);
+    const message = err.message || "Unknown error";
+    if (isHostedDeployment() && /postgresql|railway|database/i.test(message)) {
+      alert(
+        "Could not save bill — database not connected on Railway.\n\n" +
+          "Fix:\n" +
+          "1. Railway → Rinse-RiseBilling → Variables\n" +
+          "2. Delete old DATABASE_URL\n" +
+          "3. Add Variable Reference: Postgres → DATABASE_PRIVATE_URL → name DATABASE_URL\n" +
+          "4. Redeploy\n\n" +
+          "Then try Send on WhatsApp again."
+      );
+    } else {
+      alert("Could not send on WhatsApp: " + message);
+    }
   } finally {
     els.whatsappBtn.classList.remove("is-busy");
     updateActionButtons();
