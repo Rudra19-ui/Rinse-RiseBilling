@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import quote_plus
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "rinse_rise.db"
+from paths import sqlite_db_path
+
+DB_PATH = sqlite_db_path()
 
 # Full connection strings (first match wins)
 PG_ENV_KEYS = (

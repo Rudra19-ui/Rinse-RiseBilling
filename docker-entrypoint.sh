@@ -2,6 +2,12 @@
 set -e
 
 PORT="${PORT:-8080}"
+DATA="${DATA_DIR:-/app/data}"
+WA_AUTH="${WHATSAPP_AUTH_DIR:-$DATA/whatsapp-auth}"
+WA_CACHE="${WHATSAPP_CACHE_DIR:-$DATA/whatsapp-cache}"
+
+mkdir -p "$DATA/invoices" "$WA_AUTH" "$WA_CACHE"
+touch "$DATA/.persistent_volume" 2>/dev/null || true
 
 start_bridge_background() {
   if [ "${WHATSAPP_ENABLED:-1}" = "0" ]; then
@@ -9,19 +15,29 @@ start_bridge_background() {
     return 0
   fi
 
-  mkdir -p "${WHATSAPP_AUTH_DIR:-/app/whatsapp-bridge/.wwebjs_auth}"
-  mkdir -p "${WHATSAPP_CACHE_DIR:-/app/whatsapp-bridge/.wwebjs_cache}"
-  mkdir -p /app/data/invoices
+  export WHATSAPP_AUTH_DIR="$WA_AUTH"
+  export WHATSAPP_CACHE_DIR="$WA_CACHE"
 
   (
-    # Give Gunicorn a few seconds to bind before Chrome starts (saves RAM during healthcheck)
     sleep 8
     cd /app/whatsapp-bridge
+    backoff=15
     while true; do
-      echo "Starting WhatsApp bridge..."
-      node server.js >> /app/whatsapp-bridge/bridge.log 2>&1
-      echo "WhatsApp bridge exited — restarting in 15s..."
-      sleep 15
+      if [ -f "$WA_AUTH/.bridge.lock" ]; then
+        pid="$(cat "$WA_AUTH/.bridge.lock" 2>/dev/null || echo "")"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+          echo "WhatsApp bridge already running (pid $pid)"
+          sleep 30
+          continue
+        fi
+      fi
+      echo "Starting WhatsApp bridge (auth: $WA_AUTH)..."
+      node server.js >> "$DATA/whatsapp-bridge.log" 2>&1
+      echo "WhatsApp bridge exited — restarting in ${backoff}s..."
+      sleep "$backoff"
+      if [ "$backoff" -lt 120 ]; then
+        backoff=$((backoff + 15))
+      fi
     done
   ) &
 }
@@ -29,6 +45,7 @@ start_bridge_background() {
 start_bridge_background
 
 echo "Starting Gunicorn on port ${PORT}..."
+echo "Persistent data directory: $DATA (mount a Railway Volume here)"
 exec gunicorn \
   --bind "0.0.0.0:${PORT}" \
   --workers "${WEB_CONCURRENCY:-1}" \

@@ -38,6 +38,48 @@ let client = null;
 let recovering = false;
 let sendInProgress = false;
 
+const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
+let lastReconnectAt = 0;
+
+function ensureAuthDirs() {
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+}
+
+function processAlive(pid) {
+  if (!pid || Number.isNaN(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireSingleInstanceLock() {
+  ensureAuthDirs();
+  if (fs.existsSync(LOCK_FILE)) {
+    const existing = parseInt(String(fs.readFileSync(LOCK_FILE, "utf8")).trim(), 10);
+    if (processAlive(existing) && existing !== process.pid) {
+      console.error(`[WhatsApp] Bridge already running (pid ${existing}). Exiting duplicate.`);
+      process.exit(0);
+    }
+    fs.unlinkSync(LOCK_FILE);
+  }
+  fs.writeFileSync(LOCK_FILE, String(process.pid));
+}
+
+function releaseSingleInstanceLock() {
+  try {
+    if (fs.existsSync(LOCK_FILE)) {
+      const existing = parseInt(String(fs.readFileSync(LOCK_FILE, "utf8")).trim(), 10);
+      if (existing === process.pid) fs.unlinkSync(LOCK_FILE);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
@@ -139,6 +181,8 @@ function createClient() {
   const clientOptions = {
     authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: "rinse-rise" }),
     puppeteer: puppeteerConfig,
+    takeoverOnConflict: true,
+    takeoverTimeoutMs: 0,
   };
 
   if (IS_HOSTED) {
@@ -216,24 +260,38 @@ function bindClientEvents(waClient) {
   waClient.on("disconnected", (reason) => {
     clearTimeout(authTimer);
     state.ready = false;
+    const reasonText = String(reason || "unknown");
+    console.warn("[WhatsApp] Disconnected:", reasonText);
+
+    if (reasonText === "LOGOUT" || reasonText === "UNPAIRED") {
+      state.phase = "error";
+      state.lastError = "Logged out from phone. Click Reset Connection and scan QR again.";
+      return;
+    }
+
     state.phase = "disconnected";
-    state.lastError = `Disconnected (${reason}). Reconnecting…`;
-    console.warn("[WhatsApp] Disconnected:", reason);
-    scheduleReconnect(3000);
+    state.lastError = `Reconnecting (${reasonText})…`;
+    scheduleReconnect(15000);
   });
 
   waClient.on("error", (err) => {
     console.error("[WhatsApp] Client error:", err?.message || err);
+    if (!state.ready) return;
     if (isSessionError(err)) {
       state.ready = false;
-      state.phase = "error";
-      state.lastError = "WhatsApp session error. Reconnecting…";
-      scheduleReconnect(2000);
+      state.phase = "disconnected";
+      state.lastError = "WhatsApp reconnecting…";
+      scheduleReconnect(20000);
     }
   });
 }
 
 function scheduleReconnect(delayMs) {
+  const now = Date.now();
+  if (now - lastReconnectAt < 20000) {
+    delayMs = Math.max(delayMs, 20000);
+  }
+  lastReconnectAt = now;
   clearTimeout(scheduleReconnect._timer);
   scheduleReconnect._timer = setTimeout(() => {
     softRecoverClient("disconnect").catch((err) => {
@@ -316,19 +374,31 @@ async function softRecoverClient(reason) {
   }
 
   recovering = true;
-  state.ready = false;
-  state.phase = "reconnecting";
   state.lastError = "Reconnecting WhatsApp session…";
   console.warn("[WhatsApp] Recovering session:", reason);
 
   try {
+    if (client) {
+      try {
+        const waState = await client.getState();
+        if (waState === "CONNECTED") {
+          markReady("recover-check");
+          return true;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+
+    state.ready = false;
+    state.phase = "reconnecting";
     await destroyClient();
     await initializeClient();
-    const ok = await waitForReady(45000);
+    const ok = await waitForReady(60000);
     if (!ok && state.phase === "qr") {
       state.lastError = "Scan the QR code in the billing app to reconnect WhatsApp.";
     } else if (!ok) {
-      state.lastError = "WhatsApp reconnect timed out. Click Reset Connection and scan again.";
+      state.lastError = "WhatsApp reconnect timed out. Click Reset Connection if needed.";
     }
     return ok;
   } finally {
@@ -489,9 +559,20 @@ app.post("/send", async (req, res) => {
 });
 
 app.listen(PORT, "127.0.0.1", () => {
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
+  acquireSingleInstanceLock();
+  process.on("SIGINT", () => {
+    releaseSingleInstanceLock();
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    releaseSingleInstanceLock();
+    process.exit(0);
+  });
+  process.on("exit", releaseSingleInstanceLock);
+
+  ensureAuthDirs();
   console.log(`[WhatsApp] Bridge running on http://127.0.0.1:${PORT}`);
+  console.log(`[WhatsApp] Session data: ${AUTH_DIR}`);
   if (CHROME_PATH) {
     console.log(`[WhatsApp] Using Chromium at ${CHROME_PATH}`);
   }

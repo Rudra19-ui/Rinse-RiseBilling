@@ -45,6 +45,15 @@ def try_start_bridge(*, wait_seconds: float = 0) -> bool:
     if bridge_is_running():
         return True
 
+    if is_cloud_deployment():
+        if wait_seconds > 0:
+            deadline = time.monotonic() + wait_seconds
+            while time.monotonic() < deadline:
+                if bridge_is_running():
+                    return True
+                time.sleep(1)
+        return bridge_is_running()
+
     node_exe = shutil.which("node")
     server_js = BRIDGE_DIR / "server.js"
     node_modules = BRIDGE_DIR / "node_modules"

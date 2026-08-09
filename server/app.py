@@ -15,6 +15,8 @@ from werkzeug.exceptions import HTTPException
 
 from db import get_connection, is_postgres
 
+from paths import ensure_data_dirs, invoice_dir, persistence_status
+
 from database import (
     build_customer_profile,
     create_bill,
@@ -153,7 +155,9 @@ def health():
             "fixSteps": fix_steps or config.get("fixSteps"),
             "whatsappEnabled": wa_on,
             "whatsappAvailable": wa_available,
+            "whatsappReady": get_bridge_status().get("ready") if wa_available else False,
             "hosted": is_cloud_deployment(),
+            "persistence": persistence_status(),
         }
     )
 
@@ -360,24 +364,28 @@ def bootstrap_app() -> None:
         print(f"WARNING: {config['warning']}")
         for step in config.get("fixSteps", []):
             print(f"  → {step}")
-    (ROOT / "data" / "invoices").mkdir(parents=True, exist_ok=True)
+    ensure_data_dirs()
     try:
         ensure_database()
         print(f"Rinse & Rise Billing — {config['backend']} database ready")
         if config.get("postgresEnvVar"):
             print(f"PostgreSQL connected via {config['postgresEnvVar']}")
+        persist = persistence_status()
+        print(f"Data directory: {persist['dataDir']}")
+        if persist.get("volumeRecommended"):
+            print("TIP: Mount a Railway Volume at /app/data to keep bills & WhatsApp session after redeploy")
     except Exception as exc:
         print(f"ERROR: Database init failed ({exc}). Will retry on first API request.")
 
-    if whatsapp_enabled():
+    if whatsapp_enabled() and not is_cloud_deployment():
         if try_start_bridge():
             print("WhatsApp bridge starting — logs: whatsapp-bridge/bridge.log")
         elif bridge_is_running():
             print("WhatsApp bridge already running on port 3001")
-        elif is_cloud_deployment():
-            print("WhatsApp bridge will start from entrypoint — open WhatsApp in the app to scan QR")
         else:
             print("WhatsApp bridge not running — install Node.js and run Start Billing.bat")
+    elif whatsapp_enabled() and is_cloud_deployment():
+        print("WhatsApp bridge managed by container entrypoint (single instance)")
 
 
 bootstrap_app()

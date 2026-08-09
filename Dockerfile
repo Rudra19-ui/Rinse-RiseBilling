@@ -8,8 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     WHATSAPP_BRIDGE_URL=http://127.0.0.1:3001 \
     WHATSAPP_BRIDGE_PORT=3001 \
-    WHATSAPP_AUTH_DIR=/app/whatsapp-bridge/.wwebjs_auth \
-    WHATSAPP_CACHE_DIR=/app/whatsapp-bridge/.wwebjs_cache \
+    DATA_DIR=/app/data \
+    WHATSAPP_AUTH_DIR=/app/data/whatsapp-auth \
+    WHATSAPP_CACHE_DIR=/app/data/whatsapp-cache \
     WHATSAPP_ENABLED=1
 
 WORKDIR /app
@@ -55,7 +56,7 @@ RUN cd whatsapp-bridge && npm ci --omit=dev
 
 COPY . .
 
-RUN mkdir -p data/invoices whatsapp-bridge/.wwebjs_auth whatsapp-bridge/.wwebjs_cache \
+RUN mkdir -p /app/data/invoices /app/data/whatsapp-auth /app/data/whatsapp-cache \
     && sed -i 's/\r$//' docker-entrypoint.sh \
     && chmod +x docker-entrypoint.sh
 
