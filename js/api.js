@@ -127,11 +127,20 @@ const API = {
     });
   },
 
-  resetWhatsAppSession() {
-    return this.request("/api/whatsapp/reset", {
+  async resetWhatsAppSession() {
+    const res = await fetch("/api/whatsapp/reset", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403 && data.sessionLocked) {
+      return { ok: false, sessionLocked: true, error: data.error };
+    }
+    if (!res.ok) {
+      throw new Error(data.error || `Request failed (${res.status})`);
+    }
+    return data;
   },
 
   sendBillWhatsApp(billId) {

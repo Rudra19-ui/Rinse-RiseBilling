@@ -10,6 +10,6 @@
   "dependencies": {
     "express": "^4.21.2",
     "qrcode": "^1.5.4",
-    "whatsapp-web.js": "https://github.com/pedroslopez/whatsapp-web.js/archive/refs/heads/main.tar.gz"
+    "whatsapp-web.js": "^1.26.0"
   }
 }

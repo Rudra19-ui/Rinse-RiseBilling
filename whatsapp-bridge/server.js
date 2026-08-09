@@ -5,8 +5,6 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const QRCode = require("qrcode");
-const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 
 const PORT = Number(process.env.WHATSAPP_BRIDGE_PORT || 3001);
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(__dirname, ".wwebjs_auth");
@@ -20,16 +18,20 @@ const AUTH_READY_TIMEOUT_MS = Number(
 );
 const REMOTE_WA_HTML =
   process.env.WHATSAPP_WEB_HTML_URL ||
-  "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html";
+  "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1014590669-alpha.html";
+const SESSION_LINKED_FILE = path.join(AUTH_DIR, ".session-linked");
+const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
 
 const state = {
   ready: false,
   qr: null,
   lastError: null,
-  phase: "starting",
+  phase: "booting",
   loadingPercent: 0,
   authenticatingSince: null,
   waState: null,
+  sessionLinked: false,
+  sessionRestoring: false,
 };
 
 let authTimer = null;
@@ -37,8 +39,7 @@ let connectPollTimer = null;
 let client = null;
 let recovering = false;
 let sendInProgress = false;
-
-const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
+let waModule = null;
 let lastReconnectAt = 0;
 
 function ensureAuthDirs() {
@@ -80,6 +81,37 @@ function releaseSingleInstanceLock() {
   }
 }
 
+function hasSavedSession() {
+  try {
+    return fs
+      .readdirSync(AUTH_DIR)
+      .some((name) => name.startsWith("session-") || name === "Default");
+  } catch {
+    return false;
+  }
+}
+
+function isSessionLinked() {
+  return state.sessionLinked || fs.existsSync(SESSION_LINKED_FILE);
+}
+
+function markSessionLinked() {
+  state.sessionLinked = true;
+  try {
+    fs.writeFileSync(SESSION_LINKED_FILE, new Date().toISOString());
+  } catch (err) {
+    console.warn("[WhatsApp] Could not write session-linked marker:", err.message);
+  }
+}
+
+function loadWhatsAppModule() {
+  if (!waModule) {
+    const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
+    waModule = { Client, LocalAuth, MessageMedia };
+  }
+  return waModule;
+}
+
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
@@ -99,6 +131,8 @@ function markReady(source) {
   state.phase = "ready";
   state.ready = true;
   state.authenticatingSince = null;
+  state.sessionRestoring = false;
+  markSessionLinked();
   console.log(`[WhatsApp] Connected and ready (${source}).`);
 }
 
@@ -127,7 +161,7 @@ function scheduleAuthTimeout() {
     if (!state.ready) {
       state.phase = "error";
       state.lastError =
-        "Setup timed out after linking your phone. Click Reset Connection, wait for a new QR, scan again, and keep this window open for up to 5 minutes.";
+        "Setup timed out after linking your phone. Wait for the server to finish syncing, or contact support if this persists.";
       console.error("[WhatsApp] Ready timed out after authentication.");
       clearConnectPoll();
     }
@@ -163,6 +197,7 @@ function isSessionError(err) {
 }
 
 function createClient() {
+  const { Client, LocalAuth } = loadWhatsAppModule();
   const puppeteerConfig = {
     headless: true,
     args: [
@@ -172,6 +207,16 @@ function createClient() {
       "--disable-gpu",
       "--no-first-run",
       "--mute-audio",
+      "--disable-extensions",
+      "--disable-software-rasterizer",
+      "--disable-background-networking",
+      "--disable-default-apps",
+      "--disable-sync",
+      "--disable-translate",
+      "--hide-scrollbars",
+      "--metrics-recording-only",
+      "--no-zygote",
+      ...(IS_HOSTED ? ["--single-process"] : []),
     ],
   };
   if (CHROME_PATH) {
@@ -202,12 +247,19 @@ function createClient() {
 
 function bindClientEvents(waClient) {
   waClient.on("qr", async (qr) => {
+    if (isSessionLinked() || hasSavedSession()) {
+      console.log("[WhatsApp] QR skipped — saved session exists, waiting for restore…");
+      state.phase = "restoring";
+      state.sessionRestoring = true;
+      return;
+    }
     state.ready = false;
     state.phase = "qr";
     state.loadingPercent = 0;
     state.lastError = null;
     clearTimeout(authTimer);
     try {
+      const QRCode = require("qrcode");
       state.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
     } catch (err) {
       state.lastError = "Could not render QR code.";
@@ -217,7 +269,8 @@ function bindClientEvents(waClient) {
   });
 
   waClient.on("loading_screen", (percent, message) => {
-    state.phase = "loading";
+    state.phase = hasSavedSession() || isSessionLinked() ? "restoring" : "loading";
+    state.sessionRestoring = hasSavedSession() || isSessionLinked();
     state.loadingPercent = Number(percent) || 0;
     state.qr = null;
     if (message) console.log(`[WhatsApp] Loading ${percent}% — ${message}`);
@@ -253,7 +306,7 @@ function bindClientEvents(waClient) {
     clearTimeout(authTimer);
     state.ready = false;
     state.phase = "error";
-    state.lastError = `Authentication failed: ${msg}. Click Reset Connection and scan again.`;
+    state.lastError = `Authentication failed: ${msg}. Contact support if this keeps happening.`;
     console.error("[WhatsApp] Auth failure:", msg);
   });
 
@@ -265,13 +318,21 @@ function bindClientEvents(waClient) {
 
     if (reasonText === "LOGOUT" || reasonText === "UNPAIRED") {
       state.phase = "error";
-      state.lastError = "Logged out from phone. Click Reset Connection and scan QR again.";
+      state.lastError =
+        "Logged out from phone. Unlink this device in WhatsApp → Linked Devices, then scan QR again.";
+      try {
+        fs.unlinkSync(SESSION_LINKED_FILE);
+      } catch {
+        /* ignore */
+      }
+      state.sessionLinked = false;
       return;
     }
 
-    state.phase = "disconnected";
+    state.phase = "reconnecting";
     state.lastError = `Reconnecting (${reasonText})…`;
-    scheduleReconnect(15000);
+    state.sessionRestoring = true;
+    scheduleReconnect(10000);
   });
 
   waClient.on("error", (err) => {
@@ -279,25 +340,27 @@ function bindClientEvents(waClient) {
     if (!state.ready) return;
     if (isSessionError(err)) {
       state.ready = false;
-      state.phase = "disconnected";
+      state.phase = "reconnecting";
       state.lastError = "WhatsApp reconnecting…";
-      scheduleReconnect(20000);
+      state.sessionRestoring = true;
+      scheduleReconnect(15000);
     }
   });
 }
 
 function scheduleReconnect(delayMs) {
   const now = Date.now();
-  if (now - lastReconnectAt < 20000) {
-    delayMs = Math.max(delayMs, 20000);
+  if (now - lastReconnectAt < 15000) {
+    delayMs = Math.max(delayMs, 15000);
   }
   lastReconnectAt = now;
   clearTimeout(scheduleReconnect._timer);
   scheduleReconnect._timer = setTimeout(() => {
     softRecoverClient("disconnect").catch((err) => {
-      state.phase = "error";
-      state.lastError = err.message || "Could not reconnect WhatsApp.";
+      state.phase = "reconnecting";
+      state.lastError = err.message || "Reconnecting WhatsApp session…";
       console.error("[WhatsApp] Reconnect failed:", err.message);
+      scheduleReconnect(30000);
     });
   }, delayMs);
 }
@@ -314,23 +377,6 @@ async function destroyClient() {
   client = null;
 }
 
-async function waitForConnectedState(waClient, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const waState = await waClient.getState();
-      if (waState === "CONNECTED") {
-        await sleep(2000);
-        return true;
-      }
-    } catch (err) {
-      console.warn("[WhatsApp] getState check:", err.message);
-    }
-    await sleep(500);
-  }
-  return false;
-}
-
 async function assertSendReady() {
   if (!client) throw new Error("WhatsApp not connected.");
   const waState = await client.getState();
@@ -344,8 +390,12 @@ async function initializeClient() {
   await destroyClient();
   client = createClient();
   bindClientEvents(client);
-  state.phase = "starting";
-  state.lastError = null;
+  state.phase = hasSavedSession() || isSessionLinked() ? "restoring" : "starting";
+  state.sessionRestoring = hasSavedSession() || isSessionLinked();
+  state.sessionLinked = isSessionLinked();
+  state.lastError = state.sessionRestoring
+    ? "Restoring saved WhatsApp session — no need to scan again."
+    : null;
   state.ready = false;
   state.authenticatingSince = null;
   state.waState = null;
@@ -375,6 +425,8 @@ async function softRecoverClient(reason) {
 
   recovering = true;
   state.lastError = "Reconnecting WhatsApp session…";
+  state.phase = "reconnecting";
+  state.sessionRestoring = true;
   console.warn("[WhatsApp] Recovering session:", reason);
 
   try {
@@ -391,14 +443,14 @@ async function softRecoverClient(reason) {
     }
 
     state.ready = false;
-    state.phase = "reconnecting";
     await destroyClient();
     await initializeClient();
-    const ok = await waitForReady(60000);
-    if (!ok && state.phase === "qr") {
+    const ok = await waitForReady(90000);
+    if (!ok && state.phase === "qr" && !isSessionLinked()) {
       state.lastError = "Scan the QR code in the billing app to reconnect WhatsApp.";
     } else if (!ok) {
-      state.lastError = "WhatsApp reconnect timed out. Click Reset Connection if needed.";
+      state.lastError = "Restoring WhatsApp session — please wait…";
+      state.phase = "restoring";
     }
     return ok;
   } finally {
@@ -406,7 +458,15 @@ async function softRecoverClient(reason) {
   }
 }
 
-async function resetSession() {
+async function resetSession(force = false) {
+  if (isSessionLinked() && !force) {
+    const err = new Error(
+      "WhatsApp stays connected once linked. Reset is disabled to protect your session."
+    );
+    err.code = "SESSION_LOCKED";
+    throw err;
+  }
+
   clearTimeout(scheduleReconnect._timer);
   recovering = false;
   state.ready = false;
@@ -414,6 +474,8 @@ async function resetSession() {
   state.lastError = null;
   state.phase = "starting";
   state.loadingPercent = 0;
+  state.sessionLinked = false;
+  state.sessionRestoring = false;
 
   await destroyClient();
 
@@ -433,6 +495,7 @@ function normalizePhone(phone) {
 }
 
 async function performSend(digits, message, filePath, filename) {
+  const { MessageMedia } = loadWhatsAppModule();
   await assertSendReady();
 
   const numberId = await client.getNumberId(digits);
@@ -468,7 +531,7 @@ async function performSend(digits, message, filePath, filename) {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, phase: state.phase });
 });
 
 app.get("/status", (_req, res) => {
@@ -485,14 +548,21 @@ app.get("/status", (_req, res) => {
     waState: state.waState,
     authenticatingSeconds: authSeconds,
     hosted: IS_HOSTED,
+    sessionLinked: isSessionLinked(),
+    sessionRestoring: state.sessionRestoring,
+    sessionLocked: isSessionLinked(),
   });
 });
 
-app.post("/reset", async (_req, res) => {
+app.post("/reset", async (req, res) => {
   try {
-    await resetSession();
+    const force = Boolean(req.body?.force);
+    await resetSession(force);
     res.json({ ok: true });
   } catch (err) {
+    if (err.code === "SESSION_LOCKED") {
+      return res.status(403).json({ error: err.message, sessionLocked: true });
+    }
     console.error("[WhatsApp] Reset failed:", err);
     res.status(500).json({ error: err.message || "Reset failed." });
   }
@@ -537,7 +607,7 @@ app.post("/send", async (req, res) => {
         if (!reconnected) {
           return res.status(503).json({
             error:
-              "WhatsApp send layer not ready. Open WhatsApp in the header, scan QR if shown, wait 10 seconds, then try again.",
+              "WhatsApp send layer not ready. Wait for the session to restore, then try again.",
             needsReconnect: true,
           });
         }
@@ -558,8 +628,34 @@ app.post("/send", async (req, res) => {
   }
 });
 
-app.listen(PORT, "127.0.0.1", () => {
+async function bootWhatsApp() {
   acquireSingleInstanceLock();
+  ensureAuthDirs();
+  state.sessionLinked = isSessionLinked();
+  if (state.sessionLinked || hasSavedSession()) {
+    state.phase = "restoring";
+    state.sessionRestoring = true;
+    state.lastError = "Restoring saved WhatsApp session — no need to scan again.";
+  } else {
+    state.phase = "starting";
+  }
+
+  console.log(`[WhatsApp] Session data: ${AUTH_DIR}`);
+  if (CHROME_PATH) {
+    console.log(`[WhatsApp] Using Chromium at ${CHROME_PATH}`);
+  }
+
+  try {
+    await initializeClient();
+  } catch (err) {
+    state.phase = "error";
+    state.lastError = err.message || "Could not start WhatsApp scanner.";
+    console.error("[WhatsApp] Init failed:", err.message);
+  }
+}
+
+app.listen(PORT, "127.0.0.1", () => {
+  console.log(`[WhatsApp] Bridge running on http://127.0.0.1:${PORT}`);
   process.on("SIGINT", () => {
     releaseSingleInstanceLock();
     process.exit(0);
@@ -569,16 +665,9 @@ app.listen(PORT, "127.0.0.1", () => {
     process.exit(0);
   });
   process.on("exit", releaseSingleInstanceLock);
-
-  ensureAuthDirs();
-  console.log(`[WhatsApp] Bridge running on http://127.0.0.1:${PORT}`);
-  console.log(`[WhatsApp] Session data: ${AUTH_DIR}`);
-  if (CHROME_PATH) {
-    console.log(`[WhatsApp] Using Chromium at ${CHROME_PATH}`);
-  }
-  initializeClient().catch((err) => {
+  bootWhatsApp().catch((err) => {
     state.phase = "error";
-    state.lastError = err.message;
-    console.error("[WhatsApp] Init failed:", err.message);
+    state.lastError = err.message || "Could not start WhatsApp scanner.";
+    console.error("[WhatsApp] Boot failed:", err.message);
   });
 });

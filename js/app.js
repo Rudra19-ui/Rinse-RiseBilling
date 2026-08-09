@@ -1770,22 +1770,27 @@ async function refreshWhatsAppStatus() {
     const status = await API.getWhatsAppStatus();
     const onHosted = isWhatsAppHosted(status);
     pill.dataset.state = status.ready ? "ready" : status.available ? "waiting" : "offline";
+    const restoring = Boolean(status.sessionLinked || status.sessionRestoring);
     pill.title = status.ready
       ? "WhatsApp connected — invoices send automatically"
-      : status.available
-        ? onHosted
-          ? "WhatsApp waiting — click to scan QR code (hosted server)"
-          : "WhatsApp waiting — click to scan QR code"
-        : onHosted
-          ? "WhatsApp scanner starting on server — click to open"
-          : "WhatsApp bridge not running — restart Start Billing.bat";
+      : restoring
+        ? "Restoring saved WhatsApp session on server"
+        : status.available
+          ? onHosted
+            ? "WhatsApp waiting — click to scan QR code (hosted server)"
+            : "WhatsApp waiting — click to scan QR code"
+          : onHosted
+            ? "WhatsApp scanner starting on server — click to open"
+            : "WhatsApp bridge not running — restart Start Billing.bat";
     pill.querySelector(".wa-pill-label").textContent = status.ready
       ? "WhatsApp Ready"
-      : status.available
-        ? "Scan WhatsApp QR"
-        : onHosted
-          ? "Starting Scanner…"
-          : "WhatsApp Offline";
+      : restoring
+        ? "Restoring WhatsApp…"
+        : status.available
+          ? "Scan WhatsApp QR"
+          : onHosted
+            ? "Starting Scanner…"
+            : "WhatsApp Offline";
   } catch {
     pill.dataset.state = "offline";
     pill.title = hosted
@@ -1898,52 +1903,65 @@ function renderWhatsAppConnectBody(status = null) {
         <span class="wa-connect-icon">✓</span>
         <p><strong>WhatsApp is connected!</strong></p>
         <p>Invoice PDFs will now send automatically to customers.</p>
+        <p class="wa-connect-hint">This connection stays active on the server — you do not need to scan again.</p>
       </div>
     `;
     return;
   }
 
+  const sessionLocked = Boolean(status?.sessionLocked || status?.sessionLinked);
+  const restoring = status?.phase === "restoring" || status?.phase === "reconnecting" || status?.sessionRestoring;
+
   const errorHtml = status?.lastError
     ? `<p class="wa-connect-error">${escapeHtml(status.lastError)}</p>`
     : "";
 
-  if (status?.phase === "loading" || status?.phase === "authenticating") {
+  if (status?.phase === "loading" || status?.phase === "authenticating" || restoring) {
     lastRenderedWhatsAppQr = null;
     const hosted = isWhatsAppHosted(status);
     const pct = status.loadingPercent || 0;
     const elapsed = status.authenticatingSeconds || 0;
     const displayPct =
-      status.phase === "authenticating"
+      status.phase === "authenticating" || restoring
         ? Math.min(99, Math.max(pct, 90) + Math.floor(elapsed / 15))
         : pct;
-    const label =
-      status.phase === "authenticating"
+    const label = restoring
+      ? hosted
+        ? "Restoring saved WhatsApp session on server…"
+        : "Restoring saved WhatsApp session…"
+      : status.phase === "authenticating"
         ? hosted
           ? `Phone linked — syncing on server${elapsed ? ` (${elapsed}s)` : ""}…`
           : `Phone linked — finishing setup${elapsed ? ` (${elapsed}s)` : ""}…`
         : `Loading WhatsApp Web… ${pct}%`;
-    const hint = hosted
-      ? "After scanning QR, the hosted server syncs WhatsApp in the background. This can take 3–5 minutes the first time — keep this window open."
-      : "Keep this window open. This can take up to 2 minutes the first time.";
+    const hint = restoring
+      ? "Your session is saved on the server. No need to scan QR again — please wait while it reconnects."
+      : hosted
+        ? "After scanning QR, the hosted server syncs WhatsApp in the background. This can take 3–5 minutes the first time — keep this window open."
+        : "Keep this window open. This can take up to 2 minutes the first time.";
+    const resetBtn = sessionLocked
+      ? ""
+      : `<button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>`;
     body.innerHTML = `
       <p class="wa-connect-msg">${label}</p>
       <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:${Math.max(displayPct, 8)}%"></div></div>
       ${errorHtml}
       <p class="wa-connect-hint">${hint}</p>
-      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
+      ${resetBtn}
     `;
-    bindWhatsAppResetButton();
+    if (!sessionLocked) bindWhatsAppResetButton();
     return;
   }
 
   if (status?.phase === "error" && status?.lastError) {
     lastRenderedWhatsAppQr = null;
+    const resetLabel = sessionLocked ? "Contact Support" : "Reset & Scan Again";
     body.innerHTML = `
       <p class="wa-connect-msg">Could not finish WhatsApp setup</p>
       <p class="wa-connect-error">${escapeHtml(status.lastError)}</p>
-      <button type="button" class="btn btn-primary wa-reset-btn" id="whatsappResetBtn">Reset & Scan Again</button>
+      ${sessionLocked ? "" : `<button type="button" class="btn btn-primary wa-reset-btn" id="whatsappResetBtn">${resetLabel}</button>`}
     `;
-    bindWhatsAppResetButton();
+    if (!sessionLocked) bindWhatsAppResetButton();
     return;
   }
 
@@ -1963,24 +1981,26 @@ function renderWhatsAppConnectBody(status = null) {
         <img class="wa-qr-image" src="${status.qr}" alt="WhatsApp QR code" width="280" height="280">
       </div>
       ${errorHtml}
-      <p class="wa-connect-hint">QR refreshes every ~20 seconds. If scan fails, wait for a new code or click Reset Connection.</p>
-      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
+      <p class="wa-connect-hint">Scan once — the server keeps you connected after this. QR refreshes every ~20 seconds.</p>
+      ${sessionLocked ? "" : `<button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>`}
     `;
-    bindWhatsAppResetButton();
+    if (!sessionLocked) bindWhatsAppResetButton();
     return;
   }
 
   lastRenderedWhatsAppQr = null;
   const waitingHint = isWhatsAppHosted(status)
-    ? "If this takes more than 2 minutes on the hosted server, click Reset Connection or Retry Scanner."
-    : "If this takes more than a minute, click Reset Connection or restart <strong>Start Billing.bat</strong>.";
+    ? sessionLocked
+      ? "Restoring your saved WhatsApp session on the server — no need to scan again. This can take 1–3 minutes."
+      : "If this takes more than 2 minutes on the hosted server, click Retry Scanner and wait."
+    : "If this takes more than a minute, restart <strong>Start Billing.bat</strong>.";
   body.innerHTML = `
-    <p class="wa-connect-msg">Waiting for WhatsApp QR code…</p>
+    <p class="wa-connect-msg">${sessionLocked ? "Restoring WhatsApp session…" : "Waiting for WhatsApp QR code…"}</p>
     ${errorHtml}
     <p class="wa-connect-hint">${waitingHint}</p>
-    <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
+    ${sessionLocked ? "" : `<button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>`}
   `;
-  bindWhatsAppResetButton();
+  if (!sessionLocked) bindWhatsAppResetButton();
 }
 
 function bindWhatsAppResetButton() {
@@ -2019,7 +2039,11 @@ async function resetWhatsAppConnection() {
   }
   lastRenderedWhatsAppQr = null;
   try {
-    await API.resetWhatsAppSession();
+    const result = await API.resetWhatsAppSession();
+    if (result?.sessionLocked) {
+      showWhatsAppToast("<strong>Session protected</strong>WhatsApp stays connected once linked. Reset is disabled.");
+      return;
+    }
     showWhatsAppToast("<strong>Connection reset</strong>Wait for a fresh QR code, then scan again.");
     pollWhatsAppConnectModal();
   } catch (err) {

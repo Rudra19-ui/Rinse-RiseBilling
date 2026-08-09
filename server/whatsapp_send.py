@@ -18,7 +18,10 @@ ROOT = Path(__file__).resolve().parent.parent
 BRIDGE_DIR = ROOT / "whatsapp-bridge"
 BRIDGE_URL = os.environ.get("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3001").rstrip("/")
 BRIDGE_TIMEOUT = 60
-BRIDGE_STATUS_TIMEOUT = 8
+
+
+def _bridge_status_timeout() -> int:
+    return 25 if is_cloud_deployment() else 8
 
 
 def is_cloud_deployment() -> bool:
@@ -133,11 +136,11 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
         }
 
     if auto_start and not bridge_is_running():
-        wait = 15 if hosted else 10
+        wait = 45 if hosted else 10
         try_start_bridge(wait_seconds=wait)
 
     try:
-        status = _bridge_request("/status", timeout=BRIDGE_STATUS_TIMEOUT)
+        status = _bridge_request("/status", timeout=_bridge_status_timeout())
         return {
             "available": True,
             "ready": bool(status.get("ready")),
@@ -147,28 +150,48 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
             "loadingPercent": status.get("loadingPercent"),
             "waState": status.get("waState"),
             "authenticatingSeconds": status.get("authenticatingSeconds"),
+            "sessionLinked": bool(status.get("sessionLinked")),
+            "sessionRestoring": bool(status.get("sessionRestoring")),
+            "sessionLocked": bool(status.get("sessionLocked")),
             "hosted": hosted,
             "enabled": True,
         }
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        from paths import whatsapp_auth_dir
+
+        auth_dir = whatsapp_auth_dir()
+        session_saved = auth_dir.is_dir() and any(auth_dir.glob("**/*"))
+        session_linked = (auth_dir / ".session-linked").is_file() or session_saved
         return {
             "available": False,
             "ready": False,
             "qr": None,
             "lastError": (
-                "Scanner is still starting on the server. Wait 1–2 minutes and click Retry."
+                "Restoring saved WhatsApp session on server — wait 1–3 minutes, then click Retry."
+                if hosted and session_linked
+                else "Scanner is still starting on the server. Wait 1–2 minutes and click Retry."
                 if hosted
                 else None
             ),
-            "phase": "starting",
+            "phase": "restoring" if hosted and session_linked else "starting",
+            "sessionLinked": session_linked,
+            "sessionRestoring": session_linked,
+            "sessionLocked": session_linked,
             "hosted": hosted,
             "enabled": True,
         }
 
 
-def reset_bridge_session() -> dict[str, Any]:
+def reset_bridge_session(*, force: bool = False) -> dict[str, Any]:
     try:
-        return _bridge_request("/reset", method="POST", payload={})
+        return _bridge_request("/reset", method="POST", payload={"force": force})
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            err = json.loads(body)
+            return {"ok": False, **err}
+        except json.JSONDecodeError:
+            return {"ok": False, "error": body or str(exc)}
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         return {"ok": False, "error": str(exc)}
 
