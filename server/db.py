@@ -7,17 +7,17 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from paths import sqlite_db_path
 
 DB_PATH = sqlite_db_path()
 
-# Full connection strings (first match wins)
+# Full connection strings — public URL first on Railway when internal DNS fails
 PG_ENV_KEYS = (
-    "DATABASE_URL",
-    "DATABASE_PRIVATE_URL",
     "DATABASE_PUBLIC_URL",
+    "DATABASE_PRIVATE_URL",
+    "DATABASE_URL",
     "POSTGRES_URL",
     "POSTGRESQL_URL",
 )
@@ -51,12 +51,36 @@ def _build_url_from_parts(host: str, port: str, user: str, password: str, databa
     )
 
 
+def _is_unresolved_reference(value: str) -> bool:
+    return "${{" in value or value.startswith("${")
+
+
+def _host_rank(url: str) -> int:
+    if _is_unresolved_reference(url):
+        return 99
+    if is_railway() and "railway.internal" in url:
+        return 2
+    if "proxy.rlwy.net" in url or "rlwy.net" in url:
+        return 0
+    return 1
+
+
+def _postgres_url_hosts() -> list[str]:
+    hosts: list[str] = []
+    for url in _collect_postgres_urls():
+        try:
+            hosts.append(urlparse(url).hostname or "unknown")
+        except Exception:
+            hosts.append("unknown")
+    return hosts
+
+
 def _collect_postgres_urls() -> list[str]:
-    """Collect Postgres URLs in best-first order (private internal, then public proxy)."""
+    """Collect Postgres URLs — on Railway, prefer public proxy over internal DNS."""
     priority = {
-        "DATABASE_PRIVATE_URL": 0,
-        "DATABASE_URL": 1,
-        "DATABASE_PUBLIC_URL": 2,
+        "DATABASE_PUBLIC_URL": 0,
+        "DATABASE_PRIVATE_URL": 1,
+        "DATABASE_URL": 2,
         "POSTGRES_URL": 3,
         "POSTGRESQL_URL": 4,
     }
@@ -64,14 +88,15 @@ def _collect_postgres_urls() -> list[str]:
     seen: set[str] = set()
     for key in PG_ENV_KEYS:
         value = os.environ.get(key, "").strip()
+        if _is_unresolved_reference(value):
+            continue
         if not value.startswith(("postgres://", "postgresql://")):
             continue
         normalized = _normalize_postgres_url(value)
         if normalized in seen:
             continue
         seen.add(normalized)
-        host_rank = 0 if "railway.internal" not in normalized else 1
-        ranked.append((priority.get(key, 9), host_rank, normalized))
+        ranked.append((priority.get(key, 9), _host_rank(normalized), normalized))
 
     for parts in PG_PARTS_KEYS:
         url = _build_url_from_parts(
@@ -81,12 +106,11 @@ def _collect_postgres_urls() -> list[str]:
             os.environ.get(parts[3], ""),
             os.environ.get(parts[4], ""),
         )
-        if url and url not in seen:
+        if url and url not in seen and not _is_unresolved_reference(url):
             seen.add(url)
-            host_rank = 0 if "railway.internal" not in url else 1
-            ranked.append((5, host_rank, url))
+            ranked.append((5, _host_rank(url), url))
 
-    ranked.sort(key=lambda item: (item[0], item[1]))
+    ranked.sort(key=lambda item: (item[1], item[0]))
     return [url for _, _, url in ranked]
 
 
@@ -123,20 +147,6 @@ def _postgres_probe() -> bool:
     return False
 
 
-def _sqlite_bill_count() -> int:
-    if not DB_PATH.is_file():
-        return 0
-    try:
-        import sqlite3
-
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute("SELECT COUNT(*) FROM bills").fetchone()
-        conn.close()
-        return int(row[0]) if row else 0
-    except Exception:
-        return 0
-
-
 def postgres_fallback_to_sqlite() -> bool:
     global _using_sqlite_fallback
     return _using_sqlite_fallback
@@ -153,11 +163,8 @@ def _should_use_sqlite_fallback() -> bool:
     if _postgres_probe():
         _using_sqlite_fallback = False
         return False
-    if _sqlite_bill_count() > 0:
-        _using_sqlite_fallback = True
-        return True
-    _using_sqlite_fallback = False
-    return False
+    _using_sqlite_fallback = True
+    return True
 
 
 def _resolve_database_url() -> str:
@@ -227,8 +234,7 @@ def database_config_status() -> dict[str, Any]:
                     break
         if using_fallback:
             status["warning"] = (
-                "PostgreSQL URL is set but not reachable — using SQLite on /app/data instead. "
-                "Your bills may still be in PostgreSQL; fix DATABASE_URL in Railway to restore them."
+                "PostgreSQL URL is set but not reachable — using temporary SQLite storage on this server."
             )
             status["fixSteps"] = [
                 "Railway → Rinse-RiseBilling → Variables → delete the old manual DATABASE_URL",
@@ -237,12 +243,26 @@ def database_config_status() -> dict[str, Any]:
                 "Redeploy Rinse-RiseBilling — bills will then persist in PostgreSQL",
             ]
         elif not _postgres_probe():
+            hosts = _postgres_url_hosts()
+            status["postgresUrlHosts"] = hosts
             status["warning"] = "PostgreSQL is configured but connection failed."
-            status["fixSteps"] = [
-                "Re-link DATABASE_URL using Variable Reference from the Postgres service (do not paste an old URL)",
-                "Add DATABASE_PUBLIC_URL from Postgres as a second variable reference",
-                "Redeploy the web service",
-            ]
+            if hosts == ["postgres.railway.internal"] or (
+                hosts and all("railway.internal" in (h or "") for h in hosts)
+            ):
+                status["fixSteps"] = [
+                    "Your DATABASE_URL still uses postgres.railway.internal (private DNS not working).",
+                    "Open PostgreSQL service → Variables → copy DATABASE_PUBLIC_URL",
+                    "On Rinse-RiseBilling → Variables → delete old DATABASE_URL",
+                    "Add DATABASE_URL = paste the PUBLIC url (contains proxy.rlwy.net)",
+                    "Or use Raw Editor: DATABASE_URL=${{YOUR_POSTGRES_SERVICE_NAME.DATABASE_PUBLIC_URL}}",
+                    "Redeploy Rinse-RiseBilling",
+                ]
+            else:
+                status["fixSteps"] = [
+                    "Re-link DATABASE_URL using Variable Reference from the Postgres service",
+                    "Add DATABASE_PUBLIC_URL from Postgres as a second variable",
+                    "Redeploy the web service",
+                ]
     elif is_railway():
         status["warning"] = (
             "PostgreSQL is not linked to this service. Fix in Railway dashboard (see RAILWAY_SETUP.md)."
