@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     WHATSAPP_BRIDGE_PORT=3001 \
     WHATSAPP_AUTH_DIR=/app/whatsapp-bridge/.wwebjs_auth \
     WHATSAPP_CACHE_DIR=/app/whatsapp-bridge/.wwebjs_cache \
-    WHATSAPP_ENABLED=0
+    WHATSAPP_ENABLED=1
 
 WORKDIR /app
 

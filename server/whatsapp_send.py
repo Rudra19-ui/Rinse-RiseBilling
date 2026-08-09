@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -37,7 +38,7 @@ def bridge_is_running() -> bool:
         return False
 
 
-def try_start_bridge() -> bool:
+def try_start_bridge(*, wait_seconds: float = 0) -> bool:
     """Start the Node WhatsApp bridge if installed and not already running."""
     if not whatsapp_enabled():
         return False
@@ -53,16 +54,30 @@ def try_start_bridge() -> bool:
     try:
         log_path = BRIDGE_DIR / "bridge.log"
         log_file = open(log_path, "a", encoding="utf-8")
+        env = os.environ.copy()
+        env.setdefault("WHATSAPP_BRIDGE_PORT", "3001")
+        env.setdefault("PUPPETEER_EXECUTABLE_PATH", "/usr/bin/chromium")
         subprocess.Popen(
             [node_exe, "server.js"],
             cwd=str(BRIDGE_DIR),
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            env=env,
+            start_new_session=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        return True
     except OSError:
         return False
+
+    if wait_seconds <= 0:
+        return True
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if bridge_is_running():
+            return True
+        time.sleep(1)
+    return bridge_is_running()
 
 
 def normalize_whatsapp_phone(phone: str) -> str:
@@ -109,7 +124,8 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
         }
 
     if auto_start and not bridge_is_running():
-        try_start_bridge()
+        wait = 15 if hosted else 10
+        try_start_bridge(wait_seconds=wait)
 
     try:
         status = _bridge_request("/status", timeout=BRIDGE_STATUS_TIMEOUT)
@@ -128,7 +144,11 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
             "available": False,
             "ready": False,
             "qr": None,
-            "lastError": None,
+            "lastError": (
+                "Scanner is still starting on the server. Wait 1–2 minutes and click Retry."
+                if hosted
+                else None
+            ),
             "phase": "starting",
             "hosted": hosted,
             "enabled": True,

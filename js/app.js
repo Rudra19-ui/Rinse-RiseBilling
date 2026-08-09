@@ -1748,30 +1748,52 @@ async function shareBillOnWhatsApp(phone, bill) {
 let whatsAppStatusTimer = null;
 let lastRenderedWhatsAppQr = null;
 
+function isHostedDeployment() {
+  const host = window.location.hostname.toLowerCase();
+  return (
+    host.includes("railway.app") ||
+    host.includes("up.railway.app") ||
+    host.endsWith(".vercel.app") ||
+    host.endsWith(".onrender.com")
+  );
+}
+
+function isWhatsAppHosted(status) {
+  return Boolean(status?.hosted ?? isHostedDeployment());
+}
+
 async function refreshWhatsAppStatus() {
   const pill = $("#whatsappStatusPill");
   if (!pill) return;
+  const hosted = isHostedDeployment();
   try {
     const status = await API.getWhatsAppStatus();
+    const onHosted = isWhatsAppHosted(status);
     pill.dataset.state = status.ready ? "ready" : status.available ? "waiting" : "offline";
     pill.title = status.ready
       ? "WhatsApp connected — invoices send automatically"
       : status.available
-        ? status.hosted
+        ? onHosted
           ? "WhatsApp waiting — click to scan QR code (hosted server)"
           : "WhatsApp waiting — click to scan QR code"
-        : status.hosted
+        : onHosted
           ? "WhatsApp scanner starting on server — click to open"
           : "WhatsApp bridge not running — restart Start Billing.bat";
     pill.querySelector(".wa-pill-label").textContent = status.ready
       ? "WhatsApp Ready"
       : status.available
         ? "Scan WhatsApp QR"
-        : "WhatsApp Offline";
+        : onHosted
+          ? "Starting Scanner…"
+          : "WhatsApp Offline";
   } catch {
     pill.dataset.state = "offline";
-    pill.title = "WhatsApp bridge not running";
-    pill.querySelector(".wa-pill-label").textContent = "WhatsApp Offline";
+    pill.title = hosted
+      ? "WhatsApp scanner starting on server — click to open"
+      : "WhatsApp bridge not running";
+    pill.querySelector(".wa-pill-label").textContent = hosted
+      ? "Starting Scanner…"
+      : "WhatsApp Offline";
   }
 }
 
@@ -1825,7 +1847,7 @@ async function pollWhatsAppConnectModal(startBridge = false) {
       setTimeout(closeWhatsAppConnectModal, 1200);
     }
   } catch {
-    renderWhatsAppConnectBody({ available: false, hosted: false });
+    renderWhatsAppConnectBody({ available: false, hosted: isHostedDeployment(), phase: "starting" });
   }
 }
 
@@ -1843,23 +1865,29 @@ function renderWhatsAppConnectBody(status = null) {
   }
 
   const bridgeAvailable = Boolean(status?.available);
-  const hosted = Boolean(status?.hosted);
+  const hosted = isWhatsAppHosted(status);
 
   if (!bridgeAvailable) {
     lastRenderedWhatsAppQr = null;
     const hostedHint = hosted
-      ? `<p class="wa-connect-hint">On hosted Railway, the scanner can take <strong>1–3 minutes</strong> to start while Chrome loads. Keep this window open and click Retry.</p>`
+      ? `<p class="wa-connect-hint">The QR scanner runs on this server. First start can take <strong>1–3 minutes</strong> while Chrome loads — keep this window open.</p>
+         <p class="wa-connect-hint">If no QR appears, click <strong>Retry Scanner</strong> and wait again.</p>`
       : `<ol class="wa-connect-steps">
           <li>Install <strong>Node.js</strong> from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> if not installed</li>
           <li>Close this page and restart <strong>Start Billing.bat</strong></li>
           <li>Click the <strong>WhatsApp</strong> button in the header again</li>
         </ol>`;
+    const msg =
+      status?.lastError ||
+      (hosted
+        ? "Starting WhatsApp scanner on the server…"
+        : "WhatsApp scanner service is not running yet.");
     body.innerHTML = `
-      <p class="wa-connect-msg">${hosted ? "WhatsApp scanner is starting on the server…" : "WhatsApp scanner service is not running yet."}</p>
+      <p class="wa-connect-msg">${escapeHtml(msg)}</p>
       ${hostedHint}
       <button type="button" class="btn btn-primary wa-reset-btn" id="whatsappStartBridgeBtn">${hosted ? "Retry Scanner" : "Start WhatsApp Scanner"}</button>
     `;
-    bindWhatsAppStartButton();
+    bindWhatsAppStartButton(hosted);
     return;
   }
 
@@ -1921,10 +1949,13 @@ function renderWhatsAppConnectBody(status = null) {
   }
 
   lastRenderedWhatsAppQr = null;
+  const waitingHint = isWhatsAppHosted(status)
+    ? "If this takes more than 2 minutes on the hosted server, click Reset Connection or Retry Scanner."
+    : "If this takes more than a minute, click Reset Connection or restart <strong>Start Billing.bat</strong>.";
   body.innerHTML = `
     <p class="wa-connect-msg">Waiting for WhatsApp QR code…</p>
     ${errorHtml}
-    <p class="wa-connect-hint">If this takes more than a minute, click Reset Connection or restart <strong>Start Billing.bat</strong>.</p>
+    <p class="wa-connect-hint">${waitingHint}</p>
     <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
   `;
   bindWhatsAppResetButton();
@@ -1934,22 +1965,26 @@ function bindWhatsAppResetButton() {
   $("#whatsappResetBtn")?.addEventListener("click", resetWhatsAppConnection);
 }
 
-async function bindWhatsAppStartButton() {
+async function bindWhatsAppStartButton(hosted = isHostedDeployment()) {
   const btn = $("#whatsappStartBridgeBtn");
   if (!btn || btn.dataset.bound) return;
   btn.dataset.bound = "1";
+  const retryLabel = hosted ? "Retry Scanner" : "Start WhatsApp Scanner";
   btn.addEventListener("click", async () => {
     btn.disabled = true;
-    btn.textContent = "Starting…";
+    btn.textContent = hosted ? "Starting scanner…" : "Starting…";
     try {
       await API.startWhatsAppBridge();
       renderWhatsAppConnectLoading();
       setTimeout(() => pollWhatsAppConnectModal(true), 1500);
     } catch (err) {
-      showWhatsAppToast(`<strong>Could not start scanner</strong>${escapeHtml(err.message || "Restart Start Billing.bat")}`);
+      const hint = hosted
+        ? "Scanner is still starting on the server — wait 1–2 minutes and try again."
+        : err.message || "Restart Start Billing.bat";
+      showWhatsAppToast(`<strong>Could not start scanner</strong>${escapeHtml(hint)}`);
     } finally {
       btn.disabled = false;
-      btn.textContent = "Start WhatsApp Scanner";
+      btn.textContent = retryLabel;
     }
   });
 }
@@ -3757,6 +3792,9 @@ async function init() {
   els.closeWhatsAppConnect?.addEventListener("click", closeWhatsAppConnectModal);
   els.whatsappConnectBackdrop?.addEventListener("click", closeWhatsAppConnectModal);
   refreshWhatsAppStatus();
+  if (isHostedDeployment()) {
+    API.getWhatsAppStatus(true).catch(() => {});
+  }
   setInterval(refreshWhatsAppStatus, 15000);
   els.historySearch.addEventListener("input", (e) => {
     historySearchQuery = e.target.value;

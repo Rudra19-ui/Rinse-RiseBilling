@@ -52,14 +52,21 @@ from whatsapp_send import (
 
 app = Flask(__name__, static_folder=str(ROOT), static_url_path="")
 
+_DB_API_PREFIXES = (
+    "/api/bills",
+    "/api/customers",
+    "/api/settings",
+    "/api/expenditures",
+    "/api/reports",
+    "/api/migrate",
+)
+
 
 @app.before_request
 def prepare_database():
     if request.method == "OPTIONS":
         return None
-    if not request.path.startswith("/api/"):
-        return None
-    if request.path in ("/api/health", "/api/live"):
+    if not any(request.path.startswith(prefix) for prefix in _DB_API_PREFIXES):
         return None
     try:
         ensure_database()
@@ -304,7 +311,8 @@ def api_whatsapp_status():
 def api_whatsapp_start():
     if not whatsapp_enabled():
         return jsonify({"ok": False, "error": "WhatsApp is disabled on this server.", "enabled": False})
-    started = try_start_bridge()
+    wait = 20 if is_cloud_deployment() else 10
+    started = try_start_bridge(wait_seconds=wait)
     status = get_bridge_status()
     return jsonify({"ok": started or status.get("available"), **status})
 
@@ -346,6 +354,16 @@ def bootstrap_app() -> None:
             print(f"PostgreSQL connected via {config['postgresEnvVar']}")
     except Exception as exc:
         print(f"ERROR: Database init failed ({exc}). Will retry on first API request.")
+
+    if whatsapp_enabled():
+        if try_start_bridge():
+            print("WhatsApp bridge starting — logs: whatsapp-bridge/bridge.log")
+        elif bridge_is_running():
+            print("WhatsApp bridge already running on port 3001")
+        elif is_cloud_deployment():
+            print("WhatsApp bridge will start from entrypoint — open WhatsApp in the app to scan QR")
+        else:
+            print("WhatsApp bridge not running — install Node.js and run Start Billing.bat")
 
 
 bootstrap_app()
