@@ -1805,7 +1805,7 @@ function openWhatsAppConnectModal() {
   document.body.style.overflow = "hidden";
   renderWhatsAppConnectLoading();
   clearInterval(whatsAppStatusTimer);
-  whatsAppStatusTimer = setInterval(pollWhatsAppConnectModal, 2500);
+  whatsAppStatusTimer = setInterval(pollWhatsAppConnectModal, 1000);
   pollWhatsAppConnectModal(true);
 }
 
@@ -1909,17 +1909,39 @@ function renderWhatsAppConnectBody(status = null) {
 
   if (status?.phase === "loading" || status?.phase === "authenticating") {
     lastRenderedWhatsAppQr = null;
+    const hosted = isWhatsAppHosted(status);
     const pct = status.loadingPercent || 0;
+    const elapsed = status.authenticatingSeconds || 0;
+    const displayPct =
+      status.phase === "authenticating"
+        ? Math.min(99, Math.max(pct, 90) + Math.floor(elapsed / 15))
+        : pct;
     const label =
       status.phase === "authenticating"
-        ? "Phone linked — finishing setup on this computer…"
+        ? hosted
+          ? `Phone linked — syncing on server${elapsed ? ` (${elapsed}s)` : ""}…`
+          : `Phone linked — finishing setup${elapsed ? ` (${elapsed}s)` : ""}…`
         : `Loading WhatsApp Web… ${pct}%`;
+    const hint = hosted
+      ? "After scanning QR, the hosted server syncs WhatsApp in the background. This can take 3–5 minutes the first time — keep this window open."
+      : "Keep this window open. This can take up to 2 minutes the first time.";
     body.innerHTML = `
       <p class="wa-connect-msg">${label}</p>
-      <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:${Math.max(pct, 8)}%"></div></div>
+      <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:${Math.max(displayPct, 8)}%"></div></div>
       ${errorHtml}
-      <p class="wa-connect-hint">Keep this window open. This can take up to 2 minutes the first time.</p>
+      <p class="wa-connect-hint">${hint}</p>
       <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
+    `;
+    bindWhatsAppResetButton();
+    return;
+  }
+
+  if (status?.phase === "error" && status?.lastError) {
+    lastRenderedWhatsAppQr = null;
+    body.innerHTML = `
+      <p class="wa-connect-msg">Could not finish WhatsApp setup</p>
+      <p class="wa-connect-error">${escapeHtml(status.lastError)}</p>
+      <button type="button" class="btn btn-primary wa-reset-btn" id="whatsappResetBtn">Reset & Scan Again</button>
     `;
     bindWhatsAppResetButton();
     return;

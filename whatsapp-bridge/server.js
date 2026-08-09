@@ -12,9 +12,15 @@ const PORT = Number(process.env.WHATSAPP_BRIDGE_PORT || 3001);
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(__dirname, ".wwebjs_auth");
 const CACHE_DIR = process.env.WHATSAPP_CACHE_DIR || path.join(__dirname, ".wwebjs_cache");
 const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || "";
-
-const app = express();
-app.use(express.json({ limit: "2mb" }));
+const IS_HOSTED = Boolean(
+  process.env.RAILWAY_ENVIRONMENT || process.env.PUPPETEER_EXECUTABLE_PATH
+);
+const AUTH_READY_TIMEOUT_MS = Number(
+  process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 300000 : 120000)
+);
+const REMOTE_WA_HTML =
+  process.env.WHATSAPP_WEB_HTML_URL ||
+  "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html";
 
 const state = {
   ready: false,
@@ -22,12 +28,69 @@ const state = {
   lastError: null,
   phase: "starting",
   loadingPercent: 0,
+  authenticatingSince: null,
+  waState: null,
 };
 
 let authTimer = null;
+let connectPollTimer = null;
 let client = null;
 let recovering = false;
 let sendInProgress = false;
+
+const app = express();
+app.use(express.json({ limit: "2mb" }));
+
+function clearConnectPoll() {
+  if (connectPollTimer) {
+    clearInterval(connectPollTimer);
+    connectPollTimer = null;
+  }
+}
+
+function markReady(source) {
+  clearTimeout(authTimer);
+  clearConnectPoll();
+  state.qr = null;
+  state.lastError = null;
+  state.loadingPercent = 100;
+  state.phase = "ready";
+  state.ready = true;
+  state.authenticatingSince = null;
+  console.log(`[WhatsApp] Connected and ready (${source}).`);
+}
+
+function startConnectedPoll(waClient) {
+  clearConnectPoll();
+  connectPollTimer = setInterval(async () => {
+    if (state.ready || !waClient) {
+      clearConnectPoll();
+      return;
+    }
+    try {
+      const waState = await waClient.getState();
+      state.waState = waState || null;
+      if (waState === "CONNECTED") {
+        markReady("state-poll");
+      }
+    } catch (err) {
+      console.warn("[WhatsApp] State poll:", err.message);
+    }
+  }, 2000);
+}
+
+function scheduleAuthTimeout() {
+  clearTimeout(authTimer);
+  authTimer = setTimeout(() => {
+    if (!state.ready) {
+      state.phase = "error";
+      state.lastError =
+        "Setup timed out after linking your phone. Click Reset Connection, wait for a new QR, scan again, and keep this window open for up to 5 minutes.";
+      console.error("[WhatsApp] Ready timed out after authentication.");
+      clearConnectPoll();
+    }
+  }, AUTH_READY_TIMEOUT_MS);
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,11 +128,6 @@ function createClient() {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--disable-software-rasterizer",
-      "--disable-extensions",
-      "--disable-background-networking",
-      "--disable-default-apps",
-      "--disable-sync",
       "--no-first-run",
       "--mute-audio",
     ],
@@ -78,14 +136,24 @@ function createClient() {
     puppeteerConfig.executablePath = CHROME_PATH;
   }
 
-  return new Client({
+  const clientOptions = {
     authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: "rinse-rise" }),
-    webVersionCache: {
+    puppeteer: puppeteerConfig,
+  };
+
+  if (IS_HOSTED) {
+    clientOptions.webVersionCache = {
+      type: "remote",
+      remotePath: REMOTE_WA_HTML,
+    };
+  } else {
+    clientOptions.webVersionCache = {
       type: "local",
       path: CACHE_DIR,
-    },
-    puppeteer: puppeteerConfig,
-  });
+    };
+  }
+
+  return new Client(clientOptions);
 }
 
 function bindClientEvents(waClient) {
@@ -109,43 +177,32 @@ function bindClientEvents(waClient) {
     state.loadingPercent = Number(percent) || 0;
     state.qr = null;
     if (message) console.log(`[WhatsApp] Loading ${percent}% — ${message}`);
+    if (state.loadingPercent >= 95) {
+      startConnectedPoll(waClient);
+    }
   });
 
   waClient.on("authenticated", () => {
     state.phase = "authenticating";
     state.qr = null;
     state.lastError = null;
-    console.log("[WhatsApp] Authenticated — finishing connection…");
-    clearTimeout(authTimer);
-    authTimer = setTimeout(() => {
-      if (!state.ready) {
-        state.phase = "error";
-        state.lastError =
-          "Connected on phone but setup timed out. Click Reset Connection below, then scan a fresh QR code.";
-        console.error("[WhatsApp] Ready event timed out after authentication.");
-      }
-    }, 120000);
+    state.authenticatingSince = Date.now();
+    state.loadingPercent = Math.max(state.loadingPercent, 95);
+    console.log("[WhatsApp] Authenticated — waiting for CONNECTED state…");
+    scheduleAuthTimeout();
+    startConnectedPoll(waClient);
   });
 
-  waClient.on("ready", async () => {
-    clearTimeout(authTimer);
-    state.qr = null;
-    state.lastError = null;
-    state.loadingPercent = 100;
-    state.phase = "ready";
-    state.ready = false;
-    console.log("[WhatsApp] Ready event — waiting for send layer…");
-
-    const connected = await waitForConnectedState(waClient, 20000);
-    if (connected) {
-      state.ready = true;
-      console.log("[WhatsApp] Connected and ready to send invoices.");
-    } else {
-      state.phase = "error";
-      state.lastError =
-        "WhatsApp loaded but send is not ready. Click Reset Connection, scan QR again, wait 10 seconds, then retry.";
-      console.error("[WhatsApp] Send layer did not become ready.");
+  waClient.on("change_state", (waState) => {
+    state.waState = waState;
+    console.log("[WhatsApp] State:", waState);
+    if (waState === "CONNECTED") {
+      markReady("change_state");
     }
+  });
+
+  waClient.on("ready", () => {
+    markReady("ready-event");
   });
 
   waClient.on("auth_failure", (msg) => {
@@ -189,6 +246,7 @@ function scheduleReconnect(delayMs) {
 
 async function destroyClient() {
   clearTimeout(authTimer);
+  clearConnectPoll();
   if (!client) return;
   try {
     await client.destroy();
@@ -231,6 +289,8 @@ async function initializeClient() {
   state.phase = "starting";
   state.lastError = null;
   state.ready = false;
+  state.authenticatingSince = null;
+  state.waState = null;
   await client.initialize();
 }
 
@@ -342,6 +402,9 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/status", (_req, res) => {
+  const authSeconds = state.authenticatingSince
+    ? Math.floor((Date.now() - state.authenticatingSince) / 1000)
+    : 0;
   res.json({
     ready: state.ready,
     qr: state.qr,
@@ -349,6 +412,9 @@ app.get("/status", (_req, res) => {
     phase: state.phase,
     loadingPercent: state.loadingPercent,
     recovering,
+    waState: state.waState,
+    authenticatingSeconds: authSeconds,
+    hosted: IS_HOSTED,
   });
 });
 

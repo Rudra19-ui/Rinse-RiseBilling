@@ -136,6 +136,8 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
             "lastError": status.get("lastError"),
             "phase": status.get("phase"),
             "loadingPercent": status.get("loadingPercent"),
+            "waState": status.get("waState"),
+            "authenticatingSeconds": status.get("authenticatingSeconds"),
             "hosted": hosted,
             "enabled": True,
         }
