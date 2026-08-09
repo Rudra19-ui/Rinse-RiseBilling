@@ -892,12 +892,16 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
     imported = 0
     bills = payload.get("bills", [])
     counter = int(payload.get("billCounter") or get_bill_counter())
+    force = bool(payload.get("force"))
 
     existing = {b["billNo"] for b in get_all_bills()}
+    server_empty = len(existing) == 0
 
     for bill in bills:
         bill_no = bill.get("billNo") or bill.get("bill_no")
-        if not bill_no or bill_no in existing:
+        if not bill_no:
+            continue
+        if bill_no in existing and not (force and server_empty):
             continue
 
         create_bill(
@@ -930,4 +934,4 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
     if counter > get_bill_counter():
         set_bill_counter(counter)
 
-    return {"imported": imported, "billCounter": get_bill_counter()}
+    return {"imported": imported, "billCounter": get_bill_counter(), "totalBills": len(get_all_bills())}

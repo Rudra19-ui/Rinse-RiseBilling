@@ -70,7 +70,7 @@ def _collect_postgres_urls() -> list[str]:
         if normalized in seen:
             continue
         seen.add(normalized)
-        host_rank = 0 if "railway.internal" in normalized else 1
+        host_rank = 0 if "railway.internal" not in normalized else 1
         ranked.append((priority.get(key, 9), host_rank, normalized))
 
     for parts in PG_PARTS_KEYS:
@@ -83,7 +83,7 @@ def _collect_postgres_urls() -> list[str]:
         )
         if url and url not in seen:
             seen.add(url)
-            host_rank = 0 if "railway.internal" in url else 1
+            host_rank = 0 if "railway.internal" not in url else 1
             ranked.append((5, host_rank, url))
 
     ranked.sort(key=lambda item: (item[0], item[1]))
@@ -210,7 +210,8 @@ def database_config_status() -> dict[str, Any]:
                     break
         if using_fallback:
             status["warning"] = (
-                "PostgreSQL URL is set but not reachable — using temporary SQLite storage on this server."
+                "PostgreSQL URL is set but not reachable — using SQLite on /app/data instead. "
+                "Your bills may still be in PostgreSQL; fix DATABASE_URL in Railway to restore them."
             )
             status["fixSteps"] = [
                 "Railway → Rinse-RiseBilling → Variables → delete the old manual DATABASE_URL",

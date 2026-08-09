@@ -1052,6 +1052,7 @@ function getCustomerOrders(phone) {
 
 async function refreshBillHistory() {
   billHistoryCache = await API.getBills();
+  backupBillHistoryToLocalStorage(billHistoryCache);
   return billHistoryCache;
 }
 
@@ -1074,11 +1075,60 @@ async function getCustomerProfile(phone) {
   return profile;
 }
 
-async function migrateLocalStorageIfNeeded() {
-  if (localStorage.getItem("sqlite_migrated") === "1") return;
+function readLocalBillBackup() {
   try {
-    const history = JSON.parse(localStorage.getItem("billHistory") || "[]");
+    return JSON.parse(localStorage.getItem("billHistory") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function backupBillHistoryToLocalStorage(bills) {
+  if (!Array.isArray(bills) || bills.length === 0) return;
+  try {
+    localStorage.setItem("billHistory", JSON.stringify(bills));
+    const maxBillNo = bills.reduce((max, bill) => {
+      const n = parseInt(String(bill.billNo || "").replace(/\D/g, ""), 10);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
+    if (maxBillNo > 0) {
+      localStorage.setItem("billCounter", String(maxBillNo + 1));
+    }
+    localStorage.setItem("billHistory_backup_at", new Date().toISOString());
+  } catch (err) {
+    console.warn("Could not back up bill history locally:", err);
+  }
+}
+
+async function migrateLocalStorageIfNeeded() {
+  try {
+    const history = readLocalBillBackup();
     const counter = localStorage.getItem("billCounter");
+    let serverBills = [];
+    try {
+      serverBills = await API.getBills();
+    } catch {
+      serverBills = [];
+    }
+
+    if (serverBills.length === 0 && history.length > 0) {
+      const result = await API.migrate({ bills: history, billCounter: counter, force: true });
+      if (result.imported > 0) {
+        showWhatsAppToast(
+          `<strong>Bill history restored</strong>${result.imported} bills recovered from this browser backup.`
+        );
+      }
+      localStorage.setItem("sqlite_migrated", "1");
+      return;
+    }
+
+    if (localStorage.getItem("sqlite_migrated") === "1") {
+      if (serverBills.length > 0) {
+        backupBillHistoryToLocalStorage(serverBills);
+      }
+      return;
+    }
+
     if (history.length || counter) {
       await API.migrate({ bills: history, billCounter: counter });
     }
@@ -1916,7 +1966,7 @@ function renderWhatsAppConnectBody(status = null) {
     ? `<p class="wa-connect-error">${escapeHtml(status.lastError)}</p>`
     : "";
 
-  if (status?.phase === "starting" && !status?.sessionLinked && !status?.qr) {
+  if (!status?.sessionLinked && !status?.qr && (status?.phase === "starting" || status?.phase === "restoring")) {
     lastRenderedWhatsAppQr = null;
     body.innerHTML = `
       <p class="wa-connect-msg">Starting WhatsApp scanner…</p>

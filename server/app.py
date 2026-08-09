@@ -146,12 +146,19 @@ def health():
                 0,
                 "DATABASE_URL points to postgres.railway.internal but this service cannot reach Postgres — re-link using Variable Reference (do not paste an old copied URL).",
             )
+    bill_count = 0
+    if db_ok:
+        try:
+            bill_count = len(get_all_bills())
+        except Exception:
+            bill_count = -1
     return jsonify(
         {
             "ok": True,
             **config,
             "dbOk": db_ok,
             "dbError": db_error,
+            "billCount": bill_count,
             "fixSteps": fix_steps or config.get("fixSteps"),
             "whatsappEnabled": wa_on,
             "whatsappAvailable": wa_available,
