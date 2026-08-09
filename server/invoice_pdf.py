@@ -27,30 +27,36 @@ BLACK = (26, 26, 26)
 GRAY = (100, 100, 100)
 LIGHT = (245, 245, 245)
 WHITE = (255, 255, 255)
+BORDER = (220, 220, 220)
+
+MARGIN = 14
+CONTENT_W = 182
+HEADER_H = 44
+FOOTER_H = 46
+QR_SIZE = 22
+LOGO_SIZE = 22
+
+TABLE_COLS = [
+    ("#", 10),
+    ("Item", 58),
+    ("Service", 36),
+    ("Qty", 22),
+    ("Rate", 26),
+    ("Amount", 30),
+]
+
+PAYMENT_TYPE_LABELS = {"cash": "Cash", "upi": "UPI Online"}
+PAYMENT_INFO_LABELS = {"pre-payment": "Pre Payment", "post-payment": "Post Payment"}
 
 SHOP = {
     "phone": "9591506548",
     "hours": "9 AM - 9 PM",
-    "address": (
-        "Shop No 1, Site No 211, 15th Cross, 4th Main, "
-        "Ananth Nagar Phase 1, Electronic City, Bangalore 560100"
+    "address_lines": (
+        "Shop No 1, Site No 211, 15th Cross, 4th Main,",
+        "Ananth Nagar Phase 1, Electronic City, Bangalore 560100",
     ),
-    "tagline": "Free Pickup & Delivery | Express 24-Hr Delivery",
+    "tagline": "Free Pickup & Delivery  |  Express 24-Hr Delivery",
 }
-
-
-MARGIN = 14
-CONTENT_W = 182  # A4 width (210) minus side margins
-TABLE_COLS = [
-    (" # ", 12),
-    ("Item", 52),
-    ("Service", 38),
-    ("Qty/ kg", 20),
-    ("Rate", 28),
-    ("Amount", 32),
-]
-FOOTER_H = 40
-QR_SIZE = 24
 
 DELIVERY_TIME_LABELS = {
     "morning": "Morning",
@@ -72,7 +78,6 @@ def _normalize_delivery_date_text(text: str) -> str:
 
 
 def format_delivery_schedule(bill: dict[str, Any]) -> str:
-    """Delivery date only (no time slot or pickup/delivery modes)."""
     date_val = (bill.get("deliveryDate") or "").strip()
     if date_val:
         try:
@@ -105,9 +110,20 @@ def _strip_delivery_time_suffix(text: str) -> str:
 
 def format_service_name(name: str) -> str:
     cleaned = (name or "").strip()
-    if cleaned.lower() == "lundry":
+    if cleaned.lower() in ("lundry", "laundry"):
         return "Laundry"
     return cleaned or "-"
+
+
+def format_payment_summary(bill: dict[str, Any]) -> str:
+    parts: list[str] = []
+    pt = PAYMENT_TYPE_LABELS.get((bill.get("paymentType") or "").strip(), "")
+    pi = PAYMENT_INFO_LABELS.get((bill.get("paymentInfo") or "").strip(), "")
+    if pt:
+        parts.append(pt)
+    if pi:
+        parts.append(pi)
+    return " · ".join(parts) if parts else "-"
 
 
 def format_qty_display(item: dict[str, Any]) -> str:
@@ -115,7 +131,7 @@ def format_qty_display(item: dict[str, Any]) -> str:
     if _is_kg_item(item):
         text = str(int(qty)) if qty == int(qty) else f"{qty:.1f}"
         return f"{text} kg"
-    return str(int(qty)) + " pc"
+    return f"{int(qty)} pc"
 
 
 def _is_kg_item(item: dict[str, Any]) -> bool:
@@ -145,7 +161,6 @@ def format_qty_rate_line(item: dict[str, Any]) -> str:
 
 
 def format_bill_date(value: str | None) -> str:
-    """Bill created date/time in India (IST), matching the billing screen."""
     if not value:
         dt = datetime.now(IST)
     else:
@@ -198,7 +213,7 @@ def build_whatsapp_message(bill: dict[str, Any]) -> str:
             "Rinse - Rise - Repeat",
             f"Call: {SHOP['phone']} | {SHOP['hours']}",
             "",
-            "⭐ *Leave us a Google Review:*",
+            "*Leave us a Google Review:*",
             GOOGLE_REVIEW_URL,
         ]
     )
@@ -214,92 +229,206 @@ def invoice_filename(bill: dict[str, Any]) -> str:
 class InvoicePDF(FPDF):
     def footer(self):
         footer_top = self.h - FOOTER_H
-        qr_w = QR_SIZE + 8 if REVIEW_QR_PATH.is_file() else 0
-        text_w = self.w - (MARGIN * 2) - qr_w
+        qr_block_w = QR_SIZE + 10 if REVIEW_QR_PATH.is_file() else 0
+        text_w = self.w - (MARGIN * 2) - qr_block_w
+        text_center_x = MARGIN + text_w / 2
 
-        self.set_draw_color(220, 220, 220)
+        self.set_draw_color(*BORDER)
+        self.set_line_width(0.2)
         self.line(MARGIN, footer_top, self.w - MARGIN, footer_top)
 
-        text_x = MARGIN
-        self.set_xy(text_x, footer_top + 5)
+        line_y = footer_top + 6
         self.set_font("Helvetica", "B", 9)
         self.set_text_color(*BLACK)
-        self.cell(text_w, 5, "Thank you for choosing Rinse & Rise Laundryrite!", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.set_xy(MARGIN, line_y)
+        self.cell(text_w, 5, "Thank you for choosing Rinse & Rise Laundryrite!", align="C")
 
-        self.set_x(text_x)
+        line_y += 6
         self.set_font("Helvetica", "", 8)
         self.set_text_color(*GRAY)
-        self.cell(text_w, 4.5, SHOP["tagline"], align="C", new_x="LMARGIN", new_y="NEXT")
-        self.set_x(text_x)
-        self.cell(text_w, 4.5, f"Call: {SHOP['phone']}  |  {SHOP['hours']}", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.set_x(text_x)
-        self.multi_cell(text_w, 4, SHOP["address"], align="C")
+        self.set_xy(MARGIN, line_y)
+        self.cell(text_w, 4, SHOP["tagline"], align="C")
+
+        line_y += 5
+        self.set_xy(MARGIN, line_y)
+        self.cell(text_w, 4, f"Call: {SHOP['phone']}  |  {SHOP['hours']}", align="C")
+
+        line_y += 5
+        for addr_line in SHOP["address_lines"]:
+            self.set_xy(MARGIN, line_y)
+            self.cell(text_w, 4, addr_line, align="C")
+            line_y += 4
 
         if REVIEW_QR_PATH.is_file():
             qr_x = self.w - MARGIN - QR_SIZE
-            qr_y = footer_top + (FOOTER_H - QR_SIZE - 7) / 2
+            qr_y = footer_top + (FOOTER_H - QR_SIZE - 8) / 2
             self.image(str(REVIEW_QR_PATH), x=qr_x, y=qr_y, w=QR_SIZE, h=QR_SIZE)
-            self.set_xy(qr_x - 2, qr_y + QR_SIZE + 1)
             self.set_font("Helvetica", "B", 7)
             self.set_text_color(*ORANGE)
-            self.cell(QR_SIZE + 4, 3, "Rate us on Google", align="C")
+            self.set_xy(qr_x - 4, qr_y + QR_SIZE + 1)
+            self.cell(QR_SIZE + 8, 3, "Rate us on Google", align="C")
             self.set_font("Helvetica", "", 6)
             self.set_text_color(*GRAY)
-            self.set_xy(qr_x - 2, qr_y + QR_SIZE + 4)
-            self.cell(QR_SIZE + 4, 3, "Scan to review", align="C")
+            self.set_xy(qr_x - 4, qr_y + QR_SIZE + 4.5)
+            self.cell(QR_SIZE + 8, 3, "Scan to review", align="C")
 
 
-def _draw_info_box(pdf: InvoicePDF, x: float, y: float, w: float, h: float, title: str, lines: list[str]) -> None:
+def _draw_header(pdf: InvoicePDF, bill: dict[str, Any]) -> None:
+    page_w = pdf.w
+    pdf.set_fill_color(*ORANGE)
+    pdf.rect(0, 0, page_w, HEADER_H, "F")
+    pdf.set_fill_color(*ORANGE_DARK)
+    pdf.rect(0, HEADER_H - 2, page_w, 2, "F")
+
+    logo_y = (HEADER_H - LOGO_SIZE) / 2
+    if LOGO_PATH.is_file():
+        pdf.image(str(LOGO_PATH), x=MARGIN, y=logo_y, w=LOGO_SIZE, h=LOGO_SIZE)
+
+    text_x = MARGIN + LOGO_SIZE + 6
+    brand_lines = [
+        ("Helvetica", "B", 19, "RINSE & RISE", 8),
+        ("Helvetica", "B", 10, "LAUNDRYRITE", 6),
+        ("Helvetica", "", 8, "Rinse · Rise · Repeat", 5),
+    ]
+    block_h = sum(h for *_, h in brand_lines)
+    brand_y = (HEADER_H - block_h) / 2
+    pdf.set_text_color(*WHITE)
+    for font, style, size, text, lh in brand_lines:
+        pdf.set_font(font, style, size)
+        pdf.set_xy(text_x, brand_y)
+        pdf.cell(90, lh, text)
+        brand_y += lh
+
+    invoice_lines = [
+        ("Helvetica", "B", 24, "INVOICE", 9),
+        ("Helvetica", "B", 11, f"#{bill.get('billNo', '-')}", 6),
+        ("Helvetica", "", 9, format_bill_date(bill.get("createdAt")), 5),
+    ]
+    block_h = sum(h for *_, h in invoice_lines)
+    inv_y = (HEADER_H - block_h) / 2
+    for font, style, size, text, lh in invoice_lines:
+        pdf.set_font(font, style, size)
+        pdf.set_xy(MARGIN, inv_y)
+        pdf.cell(page_w - MARGIN * 2, lh, text, align="R")
+        inv_y += lh
+
+
+def _draw_info_box(
+    pdf: InvoicePDF,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    title: str,
+    primary: str,
+    secondary: str = "",
+) -> None:
     pdf.set_fill_color(*LIGHT)
-    pdf.rect(x, y, w, h, "F")
-    pdf.set_draw_color(230, 230, 230)
-    pdf.rect(x, y, w, h, "D")
+    pdf.set_draw_color(*BORDER)
+    pdf.rect(x, y, w, h, "FD")
 
     pdf.set_text_color(*ORANGE)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_xy(x + 4, y + 4)
-    pdf.cell(w - 8, 4, title)
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.set_xy(x + 5, y + 5)
+    pdf.cell(w - 10, 4, title.upper())
 
     pdf.set_text_color(*BLACK)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.set_xy(x + 4, y + 11)
-    pdf.cell(w - 8, 5, lines[0] if lines else "-")
+    pdf.set_xy(x + 5, y + 12)
+    pdf.cell(w - 10, 5, primary or "-")
 
-    if len(lines) > 1:
+    if secondary:
         pdf.set_font("Helvetica", "", 9)
-        pdf.set_xy(x + 4, y + 18)
-        pdf.cell(w - 8, 5, lines[1])
+        pdf.set_text_color(*GRAY)
+        pdf.set_xy(x + 5, y + 19)
+        pdf.cell(w - 10, 5, secondary)
+
+
+def _table_right_edge() -> float:
+    return MARGIN + CONTENT_W
+
+
+def _col_x(col_index: int) -> float:
+    x = MARGIN
+    for i in range(col_index):
+        x += TABLE_COLS[i][1]
+    return x
 
 
 def _draw_table_row(
     pdf: InvoicePDF,
     y: float,
     values: list[str],
-    widths: list[int],
     *,
     header: bool = False,
     fill: tuple[int, int, int] | None = None,
     bold_last: bool = False,
 ) -> float:
-    x = MARGIN
-    row_h = 8 if header else 7
+    row_h = 9 if header else 8
+    aligns = ("C", "L", "L", "C", "R", "R")
+
     if header:
         pdf.set_fill_color(*ORANGE)
         pdf.set_text_color(*WHITE)
-        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_font("Helvetica", "B", 8.5)
     else:
         pdf.set_fill_color(*(fill or WHITE))
         pdf.set_text_color(*BLACK)
         pdf.set_font("Helvetica", "", 9)
 
-    aligns = ("C", "L", "L", "C", "R", "R")
-    for i, (val, w, align) in enumerate(zip(values, widths, aligns)):
+    for i, ((_, width), val, align) in enumerate(zip(TABLE_COLS, values, aligns)):
+        x = _col_x(i)
+        pdf.set_draw_color(*BORDER)
         pdf.set_xy(x, y)
         if bold_last and i == len(values) - 1:
             pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(w, row_h, val, border=1, fill=True, align=align)
-        x += w
+        pdf.cell(width, row_h, val, border=1, fill=True, align=align)
+
     return y + row_h
+
+
+def _draw_totals_block(
+    pdf: InvoicePDF,
+    y: float,
+    *,
+    subtotal: float,
+    discount: float,
+    discount_pct: float,
+    total: float,
+) -> float:
+    amount_w = TABLE_COLS[-1][1]
+    label_w = TABLE_COLS[-2][1]
+    block_w = label_w + amount_w
+    block_x = _table_right_edge() - block_w
+    amount_x = block_x + label_w
+    line_h = 7
+
+    if discount > 0:
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*GRAY)
+        pdf.set_xy(block_x, y)
+        pdf.cell(label_w, line_h, "Subtotal", align="R")
+        pdf.set_xy(amount_x, y)
+        pdf.cell(amount_w, line_h, format_currency(subtotal), align="R")
+        y += line_h
+
+        pdf.set_text_color(*ORANGE)
+        pdf.set_xy(block_x, y)
+        pdf.cell(label_w, line_h, f"Discount ({discount_pct:.0f}%)", align="R")
+        pdf.set_xy(amount_x, y)
+        pdf.cell(amount_w, line_h, f"- {format_currency(discount)}", align="R")
+        y += line_h + 2
+
+    total_h = 11
+    pdf.set_fill_color(*ORANGE)
+    pdf.rect(block_x, y, block_w, total_h, "F")
+    pdf.set_text_color(*WHITE)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(block_x + 4, y + 3)
+    pdf.cell(label_w - 4, 6, "TOTAL")
+    pdf.set_xy(amount_x, y + 3)
+    pdf.cell(amount_w - 2, 6, format_currency(total), align="R")
+    return y + total_h
 
 
 def normalize_bill_for_pdf(bill: dict[str, Any]) -> dict[str, Any]:
@@ -322,52 +451,16 @@ def generate_invoice_pdf(bill: dict[str, Any], output_path: Path | str | None = 
     path = Path(output_path) if output_path else INVOICE_DIR / f"bill-{bill_id}.pdf"
 
     pdf = InvoicePDF("P", "mm", "A4")
-    pdf.set_auto_page_break(auto=True, margin=FOOTER_H + 6)
+    pdf.set_auto_page_break(auto=True, margin=FOOTER_H + 8)
     pdf.set_margins(MARGIN, MARGIN, MARGIN)
     pdf.add_page()
 
-    page_w = pdf.w
-    col_widths = [w for _, w in TABLE_COLS]
-    amount_col_w = col_widths[-1]
-    rate_col_w = col_widths[-2]
-    totals_w = amount_col_w + rate_col_w
-    totals_x = MARGIN + CONTENT_W - totals_w
+    _draw_header(pdf, bill)
 
-    # Header band
-    pdf.set_fill_color(*ORANGE)
-    pdf.rect(0, 0, page_w, 42, "F")
-    pdf.set_fill_color(*ORANGE_DARK)
-    pdf.rect(0, 40, page_w, 2, "F")
-
-    if LOGO_PATH.is_file():
-        pdf.image(str(LOGO_PATH), x=MARGIN, y=7, w=26, h=26)
-
-    pdf.set_text_color(*WHITE)
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.set_xy(44, 10)
-    pdf.cell(0, 8, "RINSE & RISE")
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_xy(44, 19)
-    pdf.cell(0, 6, "LAUNDRYRITE")
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_xy(44, 26)
-    pdf.cell(0, 5, "Rinse · Rise · Repeat")
-
-    pdf.set_font("Helvetica", "B", 26)
-    pdf.set_xy(0, 12)
-    pdf.cell(page_w - MARGIN, 10, "INVOICE", align="R")
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.set_xy(0, 22)
-    pdf.cell(page_w - MARGIN, 6, f"#{bill.get('billNo', '-')}", align="R")
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_xy(0, 29)
-    pdf.cell(page_w - MARGIN, 5, format_bill_date(bill.get("createdAt")), align="R")
-
-    y = 50
-    gap = 6
-    box_w = (CONTENT_W - gap) / 2
-    box_h = 26
-    delivery = format_delivery_schedule(bill)
+    y = HEADER_H + 8
+    gap = 5
+    box_w = (CONTENT_W - gap * 2) / 3
+    box_h = 28
 
     _draw_info_box(
         pdf,
@@ -375,16 +468,33 @@ def generate_invoice_pdf(bill: dict[str, Any], output_path: Path | str | None = 
         y,
         box_w,
         box_h,
-        "BILL TO",
-        [bill.get("customerName") or "Customer", bill.get("customerPhone") or "-"],
+        "Bill To",
+        (bill.get("customerName") or "Customer").strip(),
+        (bill.get("customerPhone") or "-").strip(),
     )
-    _draw_info_box(pdf, MARGIN + box_w + gap, y, box_w, box_h, "DELIVERY", [delivery])
+    _draw_info_box(
+        pdf,
+        MARGIN + box_w + gap,
+        y,
+        box_w,
+        box_h,
+        "Delivery",
+        format_delivery_schedule(bill),
+    )
+    _draw_info_box(
+        pdf,
+        MARGIN + (box_w + gap) * 2,
+        y,
+        box_w,
+        box_h,
+        "Payment",
+        format_payment_summary(bill),
+    )
 
-    y += box_h + 8
+    y += box_h + 10
 
-    # Items table
     header_vals = [label for label, _ in TABLE_COLS]
-    y = _draw_table_row(pdf, y, header_vals, col_widths, header=True)
+    y = _draw_table_row(pdf, y, header_vals, header=True)
 
     items = bill.get("items") or []
     for i, item in enumerate(items):
@@ -394,43 +504,28 @@ def generate_invoice_pdf(bill: dict[str, Any], output_path: Path | str | None = 
         fill = LIGHT if i % 2 == 0 else WHITE
         row = [
             str(i + 1),
-            str(item.get("name") or "-")[:44],
-            format_service_name(str(item.get("service") or "-"))[:30],
+            str(item.get("name") or "-")[:48],
+            format_service_name(str(item.get("service") or "-"))[:28],
             format_qty_display(item),
             format_currency(rate) + ("/kg" if _is_kg_item(item) else ""),
             format_currency(amount),
         ]
-        y = _draw_table_row(pdf, y, row, col_widths, fill=fill, bold_last=True)
+        y = _draw_table_row(pdf, y, row, fill=fill, bold_last=True)
 
-    y += 4
+    y += 6
     subtotal = float(bill.get("subtotal") or 0)
     discount = float(bill.get("discountAmount") or 0)
     discount_pct = float(bill.get("discountPercent") or 0)
     total = float(bill.get("total") or 0)
 
-    if discount > 0:
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(*GRAY)
-        pdf.set_xy(totals_x, y)
-        pdf.cell(rate_col_w, 6, "Subtotal:", align="R")
-        pdf.set_xy(totals_x + rate_col_w, y)
-        pdf.cell(amount_col_w, 6, format_currency(subtotal), align="R")
-        y += 6
-        pdf.set_text_color(*ORANGE)
-        pdf.set_xy(totals_x, y)
-        pdf.cell(rate_col_w, 6, f"Discount ({discount_pct:.0f}%):", align="R")
-        pdf.set_xy(totals_x + rate_col_w, y)
-        pdf.cell(amount_col_w, 6, f"- {format_currency(discount)}", align="R")
-        y += 6
-
-    pdf.set_fill_color(*ORANGE)
-    pdf.rect(totals_x, y, totals_w, 10, "F")
-    pdf.set_text_color(*WHITE)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.set_xy(totals_x + 4, y + 2.5)
-    pdf.cell(rate_col_w - 4, 6, "TOTAL")
-    pdf.set_xy(totals_x + rate_col_w, y + 2.5)
-    pdf.cell(amount_col_w, 6, format_currency(total), align="R")
+    _draw_totals_block(
+        pdf,
+        y,
+        subtotal=subtotal,
+        discount=discount,
+        discount_pct=discount_pct,
+        total=total,
+    )
 
     pdf.output(str(path))
     return path
