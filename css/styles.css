@@ -2000,6 +2000,40 @@ select:disabled {
   font-style: italic;
 }
 
+.history-recovery-banner {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius-sm);
+  border: 2px solid #f0ad4e;
+  background: #fff8e6;
+  color: #5c4a1f;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.history-recovery-banner strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.history-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.history-recovery-actions .btn {
+  white-space: nowrap;
+}
+
+.history-recovery-banner input[type="file"] {
+  display: none;
+}
+
 .history-card {
   width: 100%;
   text-align: left;

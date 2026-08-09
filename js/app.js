@@ -67,6 +67,7 @@ const els = {
   historyPeriodFilters: $("#historyPeriodFilters"),
   historyDatePick: $("#historyDatePick"),
   historyPeriodSummary: $("#historyPeriodSummary"),
+  historyRecoveryBanner: $("#historyRecoveryBanner"),
   downloadHistoryExcelBtn: $("#downloadHistoryExcelBtn"),
   expenditureBtn: $("#expenditureBtn"),
   expenditureView: $("#expenditureView"),
@@ -1048,6 +1049,126 @@ function getCustomerOrders(phone) {
   return getBillHistory().filter(
     (bill) => normalizePhoneKey(bill.customerPhone || "") === key
   );
+}
+
+async function updateHistoryRecoveryBanner(allHistory = getBillHistory()) {
+  const banner = els.historyRecoveryBanner;
+  if (!banner) return;
+  if (allHistory.length > 0) {
+    banner.classList.add("hidden");
+    banner.innerHTML = "";
+    return;
+  }
+
+  let health = null;
+  let pgProbe = null;
+  try {
+    health = await API.health();
+    pgProbe = health?.postgresProbe || (await API.probePostgres());
+  } catch {
+    pgProbe = null;
+  }
+
+  const pgBills = pgProbe?.billCount || 0;
+  const pgReachable = Boolean(pgProbe?.reachable);
+  const localBackup = readLocalBillBackup();
+
+  banner.classList.remove("hidden");
+  banner.innerHTML = `
+    <div>
+      <strong>Bill history looks empty on the server</strong>
+      <span>Your old bills may still be in PostgreSQL on Railway, or in this browser's backup (${localBackup.length} bills cached).</span>
+    </div>
+    <div class="history-recovery-actions">
+      ${pgReachable && pgBills > 0 ? `<button type="button" class="btn btn-primary" id="recoverPostgresBtn">Recover ${pgBills} bills from PostgreSQL</button>` : `<button type="button" class="btn btn-primary" id="recoverPostgresBtn">Try recover from PostgreSQL</button>`}
+      ${localBackup.length > 0 ? `<button type="button" class="btn btn-outline" id="recoverLocalBtn">Restore ${localBackup.length} bills from browser</button>` : ""}
+      <button type="button" class="btn btn-outline" id="importBackupBtn">Import backup JSON</button>
+      <input type="file" id="importBackupFile" accept="application/json,.json">
+    </div>
+  `;
+
+  $("#recoverPostgresBtn")?.addEventListener("click", recoverFromPostgres);
+  $("#recoverLocalBtn")?.addEventListener("click", restoreFromLocalBackup);
+  $("#importBackupBtn")?.addEventListener("click", () => $("#importBackupFile")?.click());
+  $("#importBackupFile")?.addEventListener("change", importBackupJsonFile);
+}
+
+async function recoverFromPostgres() {
+  const btn = $("#recoverPostgresBtn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Recovering…";
+  }
+  try {
+    const result = await API.recoverPostgres();
+    if (result.ok && result.imported > 0) {
+      alert(`Recovered ${result.imported} bills from PostgreSQL.`);
+      await refreshBillHistory();
+      renderHistoryList();
+      updateHistoryRecoveryBanner();
+      return;
+    }
+    const probe = result.probe || {};
+    if (!probe.reachable) {
+      alert(
+        "Could not reach PostgreSQL.\n\nFix on Railway:\n1. Open Rinse-RiseBilling → Variables\n2. Delete old DATABASE_URL\n3. Add Variable Reference → PostgreSQL → DATABASE_PRIVATE_URL\n4. Add DATABASE_PUBLIC_URL too\n5. Redeploy\n\nThen click Recover again."
+      );
+    } else {
+      alert(result.error || "No bills found in PostgreSQL to recover.");
+    }
+  } catch (err) {
+    alert("Recovery failed: " + (err.message || "Unknown error"));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Try recover from PostgreSQL";
+    }
+    updateHistoryRecoveryBanner();
+  }
+}
+
+async function restoreFromLocalBackup() {
+  const history = readLocalBillBackup();
+  if (!history.length) {
+    alert("No bill backup found in this browser.");
+    return;
+  }
+  const result = await API.migrate({
+    bills: history,
+    billCounter: localStorage.getItem("billCounter"),
+    force: true,
+  });
+  alert(`Restored ${result.imported || 0} bills from browser backup.`);
+  await refreshBillHistory();
+  renderHistoryList();
+  updateHistoryRecoveryBanner();
+}
+
+async function importBackupJsonFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const bills = data.bills || data;
+    if (!Array.isArray(bills) || bills.length === 0) {
+      alert("Invalid backup file — no bills array found.");
+      return;
+    }
+    const result = await API.migrate({
+      bills,
+      billCounter: data.billCounter,
+      force: true,
+    });
+    alert(`Imported ${result.imported || 0} bills from backup file.`);
+    await refreshBillHistory();
+    renderHistoryList();
+    updateHistoryRecoveryBanner();
+  } catch (err) {
+    alert("Import failed: " + (err.message || "Invalid JSON file"));
+  } finally {
+    event.target.value = "";
+  }
 }
 
 async function refreshBillHistory() {

@@ -32,7 +32,8 @@ from database import (
     get_overall_stats,
     get_profit_loss_summary,
     init_db,
-    migrate_from_local,
+    recover_bills_from_postgres,
+    probe_postgres_storage,
     normalize_phone_key,
     database_backend_name,
     database_config_status,
@@ -61,6 +62,7 @@ _DB_API_PREFIXES = (
     "/api/expenditures",
     "/api/reports",
     "/api/migrate",
+    "/api/db",
 )
 
 
@@ -147,11 +149,17 @@ def health():
                 "DATABASE_URL points to postgres.railway.internal but this service cannot reach Postgres — re-link using Variable Reference (do not paste an old copied URL).",
             )
     bill_count = 0
+    postgres_probe = None
     if db_ok:
         try:
             bill_count = len(get_all_bills())
         except Exception:
             bill_count = -1
+    if config.get("postgresConfigured"):
+        try:
+            postgres_probe = probe_postgres_storage()
+        except Exception:
+            postgres_probe = None
     return jsonify(
         {
             "ok": True,
@@ -159,6 +167,7 @@ def health():
             "dbOk": db_ok,
             "dbError": db_error,
             "billCount": bill_count,
+            "postgresProbe": postgres_probe,
             "fixSteps": fix_steps or config.get("fixSteps"),
             "whatsappEnabled": wa_on,
             "whatsappAvailable": wa_available,
@@ -357,6 +366,16 @@ def api_migrate():
     data = request.get_json(force=True, silent=True) or {}
     result = migrate_from_local(data)
     return jsonify(result)
+
+
+@app.route("/api/db/probe-postgres")
+def api_probe_postgres():
+    return jsonify(probe_postgres_storage())
+
+
+@app.route("/api/db/recover-postgres", methods=["POST"])
+def api_recover_postgres():
+    return jsonify(recover_bills_from_postgres())
 
 
 @app.route("/<path:path>", methods=["GET", "HEAD"])

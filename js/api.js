@@ -84,6 +84,14 @@ const API = {
     });
   },
 
+  probePostgres() {
+    return this.request("/api/db/probe-postgres");
+  },
+
+  recoverPostgres() {
+    return this.request("/api/db/recover-postgres", { method: "POST", body: JSON.stringify({}) });
+  },
+
   getExpenditures(fromDate = "", toDate = "") {
     const params = new URLSearchParams();
     if (fromDate) params.set("from", fromDate);

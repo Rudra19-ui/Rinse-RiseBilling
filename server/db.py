@@ -123,6 +123,20 @@ def _postgres_probe() -> bool:
     return False
 
 
+def _sqlite_bill_count() -> int:
+    if not DB_PATH.is_file():
+        return 0
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT COUNT(*) FROM bills").fetchone()
+        conn.close()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
 def postgres_fallback_to_sqlite() -> bool:
     global _using_sqlite_fallback
     return _using_sqlite_fallback
@@ -139,8 +153,11 @@ def _should_use_sqlite_fallback() -> bool:
     if _postgres_probe():
         _using_sqlite_fallback = False
         return False
-    _using_sqlite_fallback = True
-    return True
+    if _sqlite_bill_count() > 0:
+        _using_sqlite_fallback = True
+        return True
+    _using_sqlite_fallback = False
+    return False
 
 
 def _resolve_database_url() -> str:
