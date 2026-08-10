@@ -2121,11 +2121,13 @@ function buildCurrentBillPayload(sentVia) {
   };
 }
 
-async function saveBillToDatabase(sentVia) {
+async function saveBillToDatabase(sentVia, { refreshHistory = true } = {}) {
   if (billItems.length === 0) return null;
   if (!validateCustomerRequired()) return null;
   const saved = await API.createBill(buildCurrentBillPayload(sentVia));
-  await refreshBillHistory();
+  if (refreshHistory) {
+    await refreshBillHistory();
+  }
   const counterData = await API.getBillCounter();
   billCounter = counterData.billCounter;
   updateBillMeta();
@@ -3689,9 +3691,10 @@ async function sendWhatsApp() {
   els.whatsappBtn.classList.add("is-busy");
 
   try {
-    const saved = await saveBillToDatabase("whatsapp");
+    const saved = await saveBillToDatabase("whatsapp", { refreshHistory: false });
     if (!saved) return;
     await shareBillOnWhatsApp(phone, saved);
+    await refreshBillHistory();
     resetBillForm();
   } catch (err) {
     const message = err.message || "Unknown error";

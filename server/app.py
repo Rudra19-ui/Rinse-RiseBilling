@@ -40,6 +40,7 @@ from database import (
     set_customer_favorite,
     update_bill,
     update_bill_status,
+    mark_bill_sent_via,
 )
 from invoice_pdf import build_whatsapp_message, generate_invoice_pdf, invoice_filename
 from whatsapp_send import (
@@ -73,6 +74,11 @@ def _friendly_db_error(exc: Exception) -> str:
             "Open Railway → Rinse-RiseBilling → Variables → Raw Editor and use only the public URL: "
             "DATABASE_URL=${{Postgres.DATABASE_PUBLIC_URL}} "
             "(remove any DATABASE_URL that uses postgres.railway.internal), then redeploy."
+        )
+    if "deadlock detected" in msg.lower():
+        return (
+            "Database was busy for a moment (deadlock). "
+            "Please click Send on WhatsApp again — your bill may already be saved in History."
         )
     if "Database not ready:" in msg:
         return msg.replace("Database not ready: ", "", 1)
@@ -318,6 +324,8 @@ def api_send_bill_whatsapp(bill_id: int):
         return jsonify({"error": "Customer phone number is required."}), 400
     try:
         result = send_bill_via_whatsapp(bill)
+        if result.get("sent"):
+            mark_bill_sent_via(bill_id, "whatsapp")
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

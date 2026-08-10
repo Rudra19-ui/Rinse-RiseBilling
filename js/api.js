@@ -14,6 +14,10 @@ const API = {
           err.error ||
           "Database is not connected on the hosted server. Fix DATABASE_URL in Railway Variables and redeploy.";
       }
+      if (res.status === 500 && /deadlock detected/i.test(msg)) {
+        msg =
+          "Database was busy for a moment. Click Send on WhatsApp again — check History in case the bill was already saved.";
+      }
       if (res.status === 404 && path.includes("/send-whatsapp")) {
         throw new Error(
           "WhatsApp send API not found. Please restart Start Billing.bat and refresh the page (Ctrl+F5)."
@@ -84,14 +88,6 @@ const API = {
     });
   },
 
-  probePostgres() {
-    return this.request("/api/db/probe-postgres");
-  },
-
-  recoverPostgres() {
-    return this.request("/api/db/recover-postgres", { method: "POST", body: JSON.stringify({}) });
-  },
-
   getExpenditures(fromDate = "", toDate = "") {
     const params = new URLSearchParams();
     if (fromDate) params.set("from", fromDate);
@@ -135,20 +131,11 @@ const API = {
     });
   },
 
-  async resetWhatsAppSession() {
-    const res = await fetch("/api/whatsapp/reset", {
+  resetWhatsAppSession() {
+    return this.request("/api/whatsapp/reset", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 403 && data.sessionLocked) {
-      return { ok: false, sessionLocked: true, error: data.error };
-    }
-    if (!res.ok) {
-      throw new Error(data.error || `Request failed (${res.status})`);
-    }
-    return data;
   },
 
   sendBillWhatsApp(billId) {

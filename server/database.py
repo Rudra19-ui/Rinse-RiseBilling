@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from db import (
     DbConnection,
@@ -434,12 +435,61 @@ def get_bills_by_phone(phone_key: str) -> list[dict[str, Any]]:
         return [row_to_bill(r, _fetch_items(conn, r["id"])) for r in rows]
 
 
+T = TypeVar("T")
+
+
+def _retry_on_deadlock(func: Callable[[], T], *, attempts: int = 4) -> T:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return func()
+        except Exception as exc:
+            last_error = exc
+            if (
+                is_postgres()
+                and "deadlock detected" in str(exc).lower()
+                and attempt < attempts - 1
+            ):
+                time.sleep(0.05 * (2**attempt))
+                continue
+            raise
+    raise last_error or RuntimeError("create_bill failed")
+
+
+def _read_bill_counter(conn: DbConnection) -> int:
+    sql = "SELECT value FROM settings WHERE key = ?"
+    if is_postgres():
+        sql += " FOR UPDATE"
+    row = conn.execute(sql, ("bill_counter",)).fetchone()
+    if row:
+        return int(row["value"])
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?)",
+        ("bill_counter", "1"),
+    )
+    return 1
+
+
 def upsert_customer(phone: str, name: str, conn: DbConnection) -> str:
     phone_key = normalize_phone_key(phone)
     if len(phone_key) < 10:
         return phone_key
 
     now = utc_now_iso()
+    if is_postgres():
+        conn.execute(
+            """
+            INSERT INTO customers (phone_key, phone, name, profile_created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (phone_key) DO UPDATE SET
+                phone = EXCLUDED.phone,
+                name = COALESCE(NULLIF(EXCLUDED.name, ''), customers.name),
+                updated_at = EXCLUDED.updated_at
+            """,
+            (phone_key, phone, name, now, now),
+        )
+        return phone_key
+
     existing = conn.execute(
         "SELECT phone_key FROM customers WHERE phone_key = ?", (phone_key,)
     ).fetchone()
@@ -464,85 +514,97 @@ def upsert_customer(phone: str, name: str, conn: DbConnection) -> str:
     return phone_key
 
 
-def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
-    counter = get_bill_counter()
-    bill_no = payload.get("billNo") or str(counter).zfill(4)
-    now = payload.get("createdAt") or utc_now_iso()
-    phone = payload.get("customerPhone", "")
-    name = payload.get("customerName", "")
-
+def mark_bill_sent_via(bill_id: int, sent_via: str) -> None:
     with get_connection() as conn:
-        phone_key = upsert_customer(phone, name, conn)
-
-        bill_id = conn.insert_returning_id(
-            """
-            INSERT INTO bills (
-                bill_no, created_at, customer_name, customer_phone, phone_key,
-                delivery_date, delivery_time, delivery_display, service_mode,
-                home_service_mode, shop_service_mode,
-                payment_type, payment_info,
-                subtotal, discount_percent, discount_amount, total,
-                sent_via, delivery_status, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                bill_no,
-                now,
-                name,
-                phone,
-                phone_key if len(phone_key) >= 10 else None,
-                payload.get("deliveryDate", ""),
-                payload.get("deliveryTime", ""),
-                payload.get("deliveryDisplay", ""),
-                payload.get("homeServiceMode", payload.get("serviceMode", "door-pickup")),
-                payload.get("homeServiceMode", payload.get("serviceMode", "door-pickup")),
-                payload.get("shopServiceMode", ""),
-                payload.get("paymentType", ""),
-                payload.get("paymentInfo", ""),
-                payload.get("subtotal", 0),
-                payload.get("discountPercent", 0),
-                payload.get("discountAmount", 0),
-                payload.get("total", 0),
-                payload.get("sentVia", "saved"),
-                payload.get("deliveryStatus", "pending"),
-                payload.get("completedAt"),
-            ),
-        )
-
-        for item in payload.get("items", []):
-            conn.execute(
-                """
-                INSERT INTO bill_items (bill_id, item_key, name, service, category, rate, qty, unit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    bill_id,
-                    item.get("key", ""),
-                    item.get("name", ""),
-                    item.get("service", ""),
-                    item.get("category", ""),
-                    item.get("rate", 0),
-                    float(item.get("qty", 1) or 1),
-                    item.get("unit") or _infer_item_unit(item),
-                ),
-            )
-
-        try:
-            bill_num = int("".join(c for c in str(bill_no) if c.isdigit()) or "0")
-        except ValueError:
-            bill_num = counter
-        next_counter = max(counter + 1, bill_num + 1)
         conn.execute(
-            """
-            INSERT INTO settings (key, value) VALUES ('bill_counter', ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (str(next_counter),),
+            "UPDATE bills SET sent_via = ? WHERE id = ?",
+            (sent_via, bill_id),
         )
         conn.commit()
 
-        row = conn.execute("SELECT * FROM bills WHERE id = ?", (bill_id,)).fetchone()
-        return row_to_bill(row, _fetch_items(conn, bill_id))
+
+def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
+    def _create() -> dict[str, Any]:
+        now = payload.get("createdAt") or utc_now_iso()
+        phone = payload.get("customerPhone", "")
+        name = payload.get("customerName", "")
+
+        with get_connection() as conn:
+            counter = _read_bill_counter(conn)
+            bill_no = payload.get("billNo") or str(counter).zfill(4)
+            phone_key = upsert_customer(phone, name, conn)
+
+            bill_id = conn.insert_returning_id(
+                """
+                INSERT INTO bills (
+                    bill_no, created_at, customer_name, customer_phone, phone_key,
+                    delivery_date, delivery_time, delivery_display, service_mode,
+                    home_service_mode, shop_service_mode,
+                    payment_type, payment_info,
+                    subtotal, discount_percent, discount_amount, total,
+                    sent_via, delivery_status, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    bill_no,
+                    now,
+                    name,
+                    phone,
+                    phone_key if len(phone_key) >= 10 else None,
+                    payload.get("deliveryDate", ""),
+                    payload.get("deliveryTime", ""),
+                    payload.get("deliveryDisplay", ""),
+                    payload.get("homeServiceMode", payload.get("serviceMode", "door-pickup")),
+                    payload.get("homeServiceMode", payload.get("serviceMode", "door-pickup")),
+                    payload.get("shopServiceMode", ""),
+                    payload.get("paymentType", ""),
+                    payload.get("paymentInfo", ""),
+                    payload.get("subtotal", 0),
+                    payload.get("discountPercent", 0),
+                    payload.get("discountAmount", 0),
+                    payload.get("total", 0),
+                    payload.get("sentVia", "saved"),
+                    payload.get("deliveryStatus", "pending"),
+                    payload.get("completedAt"),
+                ),
+            )
+
+            for item in payload.get("items", []):
+                conn.execute(
+                    """
+                    INSERT INTO bill_items (bill_id, item_key, name, service, category, rate, qty, unit)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        bill_id,
+                        item.get("key", ""),
+                        item.get("name", ""),
+                        item.get("service", ""),
+                        item.get("category", ""),
+                        item.get("rate", 0),
+                        float(item.get("qty", 1) or 1),
+                        item.get("unit") or _infer_item_unit(item),
+                    ),
+                )
+
+            try:
+                bill_num = int("".join(c for c in str(bill_no) if c.isdigit()) or "0")
+            except ValueError:
+                bill_num = counter
+            next_counter = max(counter + 1, bill_num + 1)
+            conn.execute(
+                """
+                INSERT INTO settings (key, value) VALUES ('bill_counter', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (str(next_counter),),
+            )
+            conn.commit()
+
+            row = conn.execute("SELECT * FROM bills WHERE id = ?", (bill_id,)).fetchone()
+            return row_to_bill(row, _fetch_items(conn, bill_id))
+
+    return _retry_on_deadlock(_create)
 
 
 def update_bill_status(bill_id: int, status: str) -> dict[str, Any] | None:
