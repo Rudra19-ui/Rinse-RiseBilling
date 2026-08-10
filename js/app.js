@@ -67,7 +67,6 @@ const els = {
   historyPeriodFilters: $("#historyPeriodFilters"),
   historyDatePick: $("#historyDatePick"),
   historyPeriodSummary: $("#historyPeriodSummary"),
-  historyRecoveryBanner: $("#historyRecoveryBanner"),
   downloadHistoryExcelBtn: $("#downloadHistoryExcelBtn"),
   expenditureBtn: $("#expenditureBtn"),
   expenditureView: $("#expenditureView"),
@@ -1051,129 +1050,8 @@ function getCustomerOrders(phone) {
   );
 }
 
-async function updateHistoryRecoveryBanner(allHistory = getBillHistory()) {
-  const banner = els.historyRecoveryBanner;
-  if (!banner) return;
-  if (allHistory.length > 0) {
-    banner.classList.add("hidden");
-    banner.innerHTML = "";
-    return;
-  }
-
-  let health = null;
-  let pgProbe = null;
-  try {
-    health = await API.health();
-    pgProbe = health?.postgresProbe || (await API.probePostgres());
-  } catch {
-    pgProbe = null;
-  }
-
-  const pgBills = pgProbe?.billCount || 0;
-  const pgReachable = Boolean(pgProbe?.reachable);
-  const localBackup = readLocalBillBackup();
-
-  banner.classList.remove("hidden");
-  banner.innerHTML = `
-    <div>
-      <strong>Bill history looks empty on the server</strong>
-      <span>Your old bills may still be in PostgreSQL on Railway, or in this browser's backup (${localBackup.length} bills cached).</span>
-    </div>
-    <div class="history-recovery-actions">
-      ${pgReachable && pgBills > 0 ? `<button type="button" class="btn btn-primary" id="recoverPostgresBtn">Recover ${pgBills} bills from PostgreSQL</button>` : `<button type="button" class="btn btn-primary" id="recoverPostgresBtn">Try recover from PostgreSQL</button>`}
-      ${localBackup.length > 0 ? `<button type="button" class="btn btn-outline" id="recoverLocalBtn">Restore ${localBackup.length} bills from browser</button>` : ""}
-      <button type="button" class="btn btn-outline" id="importBackupBtn">Import backup JSON</button>
-      <input type="file" id="importBackupFile" accept="application/json,.json">
-    </div>
-  `;
-
-  $("#recoverPostgresBtn")?.addEventListener("click", recoverFromPostgres);
-  $("#recoverLocalBtn")?.addEventListener("click", restoreFromLocalBackup);
-  $("#importBackupBtn")?.addEventListener("click", () => $("#importBackupFile")?.click());
-  $("#importBackupFile")?.addEventListener("change", importBackupJsonFile);
-}
-
-async function recoverFromPostgres() {
-  const btn = $("#recoverPostgresBtn");
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Recovering…";
-  }
-  try {
-    const result = await API.recoverPostgres();
-    if (result.ok && result.imported > 0) {
-      alert(`Recovered ${result.imported} bills from PostgreSQL.`);
-      await refreshBillHistory();
-      renderHistoryList();
-      updateHistoryRecoveryBanner();
-      return;
-    }
-    const probe = result.probe || {};
-    if (!probe.reachable) {
-      alert(
-        "Could not reach PostgreSQL.\n\nFix on Railway:\n1. Open Rinse-RiseBilling → Variables\n2. Delete old DATABASE_URL\n3. Add Variable Reference → PostgreSQL → DATABASE_PRIVATE_URL\n4. Add DATABASE_PUBLIC_URL too\n5. Redeploy\n\nThen click Recover again."
-      );
-    } else {
-      alert(result.error || "No bills found in PostgreSQL to recover.");
-    }
-  } catch (err) {
-    alert("Recovery failed: " + (err.message || "Unknown error"));
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Try recover from PostgreSQL";
-    }
-    updateHistoryRecoveryBanner();
-  }
-}
-
-async function restoreFromLocalBackup() {
-  const history = readLocalBillBackup();
-  if (!history.length) {
-    alert("No bill backup found in this browser.");
-    return;
-  }
-  const result = await API.migrate({
-    bills: history,
-    billCounter: localStorage.getItem("billCounter"),
-    force: true,
-  });
-  alert(`Restored ${result.imported || 0} bills from browser backup.`);
-  await refreshBillHistory();
-  renderHistoryList();
-  updateHistoryRecoveryBanner();
-}
-
-async function importBackupJsonFile(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    const bills = data.bills || data;
-    if (!Array.isArray(bills) || bills.length === 0) {
-      alert("Invalid backup file — no bills array found.");
-      return;
-    }
-    const result = await API.migrate({
-      bills,
-      billCounter: data.billCounter,
-      force: true,
-    });
-    alert(`Imported ${result.imported || 0} bills from backup file.`);
-    await refreshBillHistory();
-    renderHistoryList();
-    updateHistoryRecoveryBanner();
-  } catch (err) {
-    alert("Import failed: " + (err.message || "Invalid JSON file"));
-  } finally {
-    event.target.value = "";
-  }
-}
-
 async function refreshBillHistory() {
   billHistoryCache = await API.getBills();
-  backupBillHistoryToLocalStorage(billHistoryCache);
   return billHistoryCache;
 }
 
@@ -1196,60 +1074,11 @@ async function getCustomerProfile(phone) {
   return profile;
 }
 
-function readLocalBillBackup() {
-  try {
-    return JSON.parse(localStorage.getItem("billHistory") || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function backupBillHistoryToLocalStorage(bills) {
-  if (!Array.isArray(bills) || bills.length === 0) return;
-  try {
-    localStorage.setItem("billHistory", JSON.stringify(bills));
-    const maxBillNo = bills.reduce((max, bill) => {
-      const n = parseInt(String(bill.billNo || "").replace(/\D/g, ""), 10);
-      return Number.isFinite(n) ? Math.max(max, n) : max;
-    }, 0);
-    if (maxBillNo > 0) {
-      localStorage.setItem("billCounter", String(maxBillNo + 1));
-    }
-    localStorage.setItem("billHistory_backup_at", new Date().toISOString());
-  } catch (err) {
-    console.warn("Could not back up bill history locally:", err);
-  }
-}
-
 async function migrateLocalStorageIfNeeded() {
+  if (localStorage.getItem("sqlite_migrated") === "1") return;
   try {
-    const history = readLocalBillBackup();
+    const history = JSON.parse(localStorage.getItem("billHistory") || "[]");
     const counter = localStorage.getItem("billCounter");
-    let serverBills = [];
-    try {
-      serverBills = await API.getBills();
-    } catch {
-      serverBills = [];
-    }
-
-    if (serverBills.length === 0 && history.length > 0) {
-      const result = await API.migrate({ bills: history, billCounter: counter, force: true });
-      if (result.imported > 0) {
-        showWhatsAppToast(
-          `<strong>Bill history restored</strong>${result.imported} bills recovered from this browser backup.`
-        );
-      }
-      localStorage.setItem("sqlite_migrated", "1");
-      return;
-    }
-
-    if (localStorage.getItem("sqlite_migrated") === "1") {
-      if (serverBills.length > 0) {
-        backupBillHistoryToLocalStorage(serverBills);
-      }
-      return;
-    }
-
     if (history.length || counter) {
       await API.migrate({ bills: history, billCounter: counter });
     }
@@ -1941,27 +1770,22 @@ async function refreshWhatsAppStatus() {
     const status = await API.getWhatsAppStatus();
     const onHosted = isWhatsAppHosted(status);
     pill.dataset.state = status.ready ? "ready" : status.available ? "waiting" : "offline";
-    const restoring = Boolean(status.sessionLinked && (status.sessionRestoring || status.phase === "restoring" || status.phase === "reconnecting"));
     pill.title = status.ready
       ? "WhatsApp connected — invoices send automatically"
-      : restoring
-        ? "Restoring saved WhatsApp session on server"
-        : status.available
-          ? onHosted
-            ? "WhatsApp waiting — click to scan QR code (hosted server)"
-            : "WhatsApp waiting — click to scan QR code"
-          : onHosted
-            ? "WhatsApp scanner starting on server — click to open"
-            : "WhatsApp bridge not running — restart Start Billing.bat";
+      : status.available
+        ? onHosted
+          ? "WhatsApp waiting — click to scan QR code (hosted server)"
+          : "WhatsApp waiting — click to scan QR code"
+        : onHosted
+          ? "WhatsApp scanner starting on server — click to open"
+          : "WhatsApp bridge not running — restart Start Billing.bat";
     pill.querySelector(".wa-pill-label").textContent = status.ready
       ? "WhatsApp Ready"
-      : restoring
-        ? "Restoring WhatsApp…"
-        : status.available
-          ? "Scan WhatsApp QR"
-          : onHosted
-            ? "Starting Scanner…"
-            : "WhatsApp Offline";
+      : status.available
+        ? "Scan WhatsApp QR"
+        : onHosted
+          ? "Starting Scanner…"
+          : "WhatsApp Offline";
   } catch {
     pill.dataset.state = "offline";
     pill.title = hosted
@@ -2047,7 +1871,7 @@ function renderWhatsAppConnectBody(status = null) {
     lastRenderedWhatsAppQr = null;
     const hostedHint = hosted
       ? `<p class="wa-connect-hint">The QR scanner runs on this server. First start can take <strong>1–3 minutes</strong> while Chrome loads — keep this window open.</p>
-         <p class="wa-connect-hint">A QR code will appear here — scan it once with your phone to connect WhatsApp.</p>`
+         <p class="wa-connect-hint">If no QR appears, click <strong>Retry Scanner</strong> and wait again.</p>`
       : `<ol class="wa-connect-steps">
           <li>Install <strong>Node.js</strong> from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> if not installed</li>
           <li>Close this page and restart <strong>Start Billing.bat</strong></li>
@@ -2074,78 +1898,52 @@ function renderWhatsAppConnectBody(status = null) {
         <span class="wa-connect-icon">✓</span>
         <p><strong>WhatsApp is connected!</strong></p>
         <p>Invoice PDFs will now send automatically to customers.</p>
-        <p class="wa-connect-hint">This connection stays active on the server — you do not need to scan again.</p>
       </div>
     `;
     return;
   }
 
-  const sessionLocked = Boolean(status?.sessionLocked || status?.sessionLinked);
-  const restoring = Boolean(status?.sessionLinked && (status?.sessionRestoring || status?.phase === "restoring" || status?.phase === "reconnecting"));
-
   const errorHtml = status?.lastError
     ? `<p class="wa-connect-error">${escapeHtml(status.lastError)}</p>`
     : "";
 
-  if (!status?.sessionLinked && !status?.qr && (status?.phase === "starting" || status?.phase === "restoring")) {
-    lastRenderedWhatsAppQr = null;
-    body.innerHTML = `
-      <p class="wa-connect-msg">Starting WhatsApp scanner…</p>
-      <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:15%"></div></div>
-      ${errorHtml}
-      <p class="wa-connect-hint">QR code will appear here in 1–2 minutes. Open WhatsApp on your phone → <strong>Linked Devices</strong> → <strong>Link a Device</strong>, then scan.</p>
-      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Show Fresh QR</button>
-    `;
-    bindWhatsAppResetButton();
-    return;
-  }
-
-  if (status?.phase === "loading" || status?.phase === "authenticating" || restoring) {
+  if (status?.phase === "loading" || status?.phase === "authenticating") {
     lastRenderedWhatsAppQr = null;
     const hosted = isWhatsAppHosted(status);
     const pct = status.loadingPercent || 0;
     const elapsed = status.authenticatingSeconds || 0;
     const displayPct =
-      status.phase === "authenticating" || restoring
+      status.phase === "authenticating"
         ? Math.min(99, Math.max(pct, 90) + Math.floor(elapsed / 15))
         : pct;
-    const label = restoring
-      ? hosted
-        ? "Restoring saved WhatsApp session on server…"
-        : "Restoring saved WhatsApp session…"
-      : status.phase === "authenticating"
+    const label =
+      status.phase === "authenticating"
         ? hosted
           ? `Phone linked — syncing on server${elapsed ? ` (${elapsed}s)` : ""}…`
           : `Phone linked — finishing setup${elapsed ? ` (${elapsed}s)` : ""}…`
         : `Loading WhatsApp Web… ${pct}%`;
-    const hint = restoring
-      ? "Your session is saved on the server. No need to scan QR again — please wait while it reconnects."
-      : hosted
-        ? "After scanning QR, the hosted server syncs WhatsApp in the background. This can take 3–5 minutes the first time — keep this window open."
-        : "Keep this window open. This can take up to 2 minutes the first time.";
-    const resetBtn = sessionLocked
-      ? ""
-      : `<button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>`;
+    const hint = hosted
+      ? "After scanning QR, the hosted server syncs WhatsApp in the background. This can take 3–5 minutes the first time — keep this window open."
+      : "Keep this window open. This can take up to 2 minutes the first time.";
     body.innerHTML = `
       <p class="wa-connect-msg">${label}</p>
       <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:${Math.max(displayPct, 8)}%"></div></div>
       ${errorHtml}
       <p class="wa-connect-hint">${hint}</p>
-      ${resetBtn}
+      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
     `;
-    if (!sessionLocked) bindWhatsAppResetButton();
+    bindWhatsAppResetButton();
     return;
   }
 
   if (status?.phase === "error" && status?.lastError) {
     lastRenderedWhatsAppQr = null;
-    const resetLabel = sessionLocked ? "Contact Support" : "Reset & Scan Again";
     body.innerHTML = `
       <p class="wa-connect-msg">Could not finish WhatsApp setup</p>
       <p class="wa-connect-error">${escapeHtml(status.lastError)}</p>
-      ${sessionLocked ? "" : `<button type="button" class="btn btn-primary wa-reset-btn" id="whatsappResetBtn">${resetLabel}</button>`}
+      <button type="button" class="btn btn-primary wa-reset-btn" id="whatsappResetBtn">Reset & Scan Again</button>
     `;
-    if (!sessionLocked) bindWhatsAppResetButton();
+    bindWhatsAppResetButton();
     return;
   }
 
@@ -2165,26 +1963,24 @@ function renderWhatsAppConnectBody(status = null) {
         <img class="wa-qr-image" src="${status.qr}" alt="WhatsApp QR code" width="280" height="280">
       </div>
       ${errorHtml}
-      <p class="wa-connect-hint">Scan once — the server keeps you connected after this. QR refreshes every ~20 seconds.</p>
-      ${sessionLocked ? "" : `<button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>`}
+      <p class="wa-connect-hint">QR refreshes every ~20 seconds. If scan fails, wait for a new code or click Reset Connection.</p>
+      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
     `;
-    if (!sessionLocked) bindWhatsAppResetButton();
+    bindWhatsAppResetButton();
     return;
   }
 
   lastRenderedWhatsAppQr = null;
   const waitingHint = isWhatsAppHosted(status)
-    ? sessionLocked
-      ? "Restoring your saved WhatsApp session on the server — no need to scan again. This can take 1–3 minutes."
-      : "If this takes more than 2 minutes on the hosted server, click Retry Scanner and wait."
-    : "If this takes more than a minute, restart <strong>Start Billing.bat</strong>.";
+    ? "If this takes more than 2 minutes on the hosted server, click Reset Connection or Retry Scanner."
+    : "If this takes more than a minute, click Reset Connection or restart <strong>Start Billing.bat</strong>.";
   body.innerHTML = `
-    <p class="wa-connect-msg">${sessionLocked ? "Restoring WhatsApp session…" : "Waiting for WhatsApp QR code…"}</p>
+    <p class="wa-connect-msg">Waiting for WhatsApp QR code…</p>
     ${errorHtml}
     <p class="wa-connect-hint">${waitingHint}</p>
-    ${sessionLocked ? "" : `<button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>`}
+    <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
   `;
-  if (!sessionLocked) bindWhatsAppResetButton();
+  bindWhatsAppResetButton();
 }
 
 function bindWhatsAppResetButton() {
@@ -2223,11 +2019,7 @@ async function resetWhatsAppConnection() {
   }
   lastRenderedWhatsAppQr = null;
   try {
-    const result = await API.resetWhatsAppSession();
-    if (result?.sessionLocked) {
-      showWhatsAppToast("<strong>Session protected</strong>WhatsApp stays connected once linked. Reset is disabled.");
-      return;
-    }
+    await API.resetWhatsAppSession();
     showWhatsAppToast("<strong>Connection reset</strong>Wait for a fresh QR code, then scan again.");
     pollWhatsAppConnectModal();
   } catch (err) {
@@ -3941,10 +3733,23 @@ async function init() {
   try {
     await API.health();
   } catch {
-    alert(
-      "Cannot connect to database server.\n\nPlease run Start Billing.bat to start the SQLite server on port 8080."
-    );
-    return;
+    if (isHostedDeployment()) {
+      try {
+        await API.getBillCounter();
+      } catch {
+        alert(
+          "Cannot connect to the hosted billing server.\n\n" +
+            "Check your internet connection and refresh the page.\n" +
+            "If it keeps failing, open Railway and confirm Rinse-RiseBilling is deployed and online."
+        );
+        return;
+      }
+    } else {
+      alert(
+        "Cannot connect to database server.\n\nPlease run Start Billing.bat to start the SQLite server on port 8080."
+      );
+      return;
+    }
   }
 
   try {

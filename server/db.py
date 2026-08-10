@@ -111,16 +111,30 @@ def _collect_postgres_urls() -> list[str]:
             ranked.append((5, _host_rank(url), url))
 
     ranked.sort(key=lambda item: (item[1], item[0]))
-    return [url for _, _, url in ranked]
+    urls = [url for _, _, url in ranked]
+    if is_railway():
+        public_urls = [
+            url
+            for url in urls
+            if "proxy.rlwy.net" in url or ".rlwy.net" in url or ".railway.app" in url
+        ]
+        if public_urls:
+            return public_urls
+    return urls
 
 
 _pg_reachable: bool | None = None
 _using_sqlite_fallback = False
 
 
-def _postgres_probe() -> bool:
+def _invalidate_postgres_probe() -> None:
     global _pg_reachable
-    if _pg_reachable is not None:
+    _pg_reachable = None
+
+
+def _postgres_probe(*, force: bool = False) -> bool:
+    global _pg_reachable
+    if not force and _pg_reachable is not None:
         return _pg_reachable
 
     urls = _collect_postgres_urls()
@@ -411,6 +425,7 @@ def get_connection() -> Iterator[DbConnection]:
             except Exception as exc:
                 last_error = exc
                 continue
+        _invalidate_postgres_probe()
         raise last_error or RuntimeError("No PostgreSQL connection URL available")
     else:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
