@@ -21,6 +21,7 @@ from database import (
     build_customer_profile,
     create_bill,
     create_expenditure,
+    clear_all_data,
     delete_expenditure,
     ensure_database,
     get_all_bills,
@@ -32,8 +33,7 @@ from database import (
     get_overall_stats,
     get_profit_loss_summary,
     init_db,
-    recover_bills_from_postgres,
-    probe_postgres_storage,
+    migrate_from_local,
     normalize_phone_key,
     database_backend_name,
     database_config_status,
@@ -62,7 +62,6 @@ _DB_API_PREFIXES = (
     "/api/expenditures",
     "/api/reports",
     "/api/migrate",
-    "/api/db",
 )
 
 
@@ -70,10 +69,10 @@ def _friendly_db_error(exc: Exception) -> str:
     msg = str(exc)
     if "postgres.railway.internal" in msg and "could not translate host name" in msg.lower():
         return (
-            "PostgreSQL is not linked correctly on Railway. "
-            "Open Railway → Rinse-RiseBilling → Variables, remove the old DATABASE_URL, "
-            "add a Variable Reference from your Postgres service (DATABASE_PRIVATE_URL), "
-            "then redeploy."
+            "PostgreSQL internal URL is not reachable. "
+            "Open Railway → Rinse-RiseBilling → Variables → Raw Editor and use only the public URL: "
+            "DATABASE_URL=${{Postgres.DATABASE_PUBLIC_URL}} "
+            "(remove any DATABASE_URL that uses postgres.railway.internal), then redeploy."
         )
     if "Database not ready:" in msg:
         return msg.replace("Database not ready: ", "", 1)
@@ -123,6 +122,9 @@ def live():
 
 @app.route("/api/health")
 def health():
+    from db import _invalidate_postgres_probe, _postgres_probe
+
+    _invalidate_postgres_probe()
     config = database_config_status()
     wa_on = whatsapp_enabled()
     wa_available = bridge_is_running() if wa_on else False
@@ -148,26 +150,12 @@ def health():
                 0,
                 "DATABASE_URL points to postgres.railway.internal but this service cannot reach Postgres — re-link using Variable Reference (do not paste an old copied URL).",
             )
-    bill_count = 0
-    postgres_probe = None
-    if db_ok:
-        try:
-            bill_count = len(get_all_bills())
-        except Exception:
-            bill_count = -1
-    if config.get("postgresConfigured"):
-        try:
-            postgres_probe = probe_postgres_storage()
-        except Exception:
-            postgres_probe = None
     return jsonify(
         {
             "ok": True,
             **config,
             "dbOk": db_ok,
             "dbError": db_error,
-            "billCount": bill_count,
-            "postgresProbe": postgres_probe,
             "fixSteps": fix_steps or config.get("fixSteps"),
             "whatsappEnabled": wa_on,
             "whatsappAvailable": wa_available,
@@ -345,7 +333,7 @@ def api_whatsapp_status():
 def api_whatsapp_start():
     if not whatsapp_enabled():
         return jsonify({"ok": False, "error": "WhatsApp is disabled on this server.", "enabled": False})
-    wait = 45 if is_cloud_deployment() else 10
+    wait = 20 if is_cloud_deployment() else 10
     started = try_start_bridge(wait_seconds=wait)
     status = get_bridge_status()
     return jsonify({"ok": started or status.get("available"), **status})
@@ -353,12 +341,7 @@ def api_whatsapp_start():
 
 @app.route("/api/whatsapp/reset", methods=["POST"])
 def api_whatsapp_reset():
-    data = request.get_json(force=True, silent=True) or {}
-    force = bool(data.get("force"))
-    result = reset_bridge_session(force=force)
-    if not result.get("ok") and result.get("sessionLocked"):
-        return jsonify(result), 403
-    return jsonify(result)
+    return jsonify(reset_bridge_session())
 
 
 @app.route("/api/migrate", methods=["POST"])
@@ -368,14 +351,15 @@ def api_migrate():
     return jsonify(result)
 
 
-@app.route("/api/db/probe-postgres")
-def api_probe_postgres():
-    return jsonify(probe_postgres_storage())
-
-
-@app.route("/api/db/recover-postgres", methods=["POST"])
-def api_recover_postgres():
-    return jsonify(recover_bills_from_postgres())
+@app.route("/api/admin/clear-data", methods=["POST"])
+def api_clear_all_data():
+    data = request.get_json(force=True, silent=True) or {}
+    password = (data.get("password") or request.headers.get("X-Clear-Data-Password") or "").strip()
+    expected = os.environ.get("CLEAR_DATA_PASSWORD", "Mandleshwar@22").strip()
+    if not password or password != expected:
+        return jsonify({"error": "Invalid password"}), 403
+    result = clear_all_data()
+    return jsonify({"ok": True, **result})
 
 
 @app.route("/<path:path>", methods=["GET", "HEAD"])

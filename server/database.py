@@ -892,16 +892,12 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
     imported = 0
     bills = payload.get("bills", [])
     counter = int(payload.get("billCounter") or get_bill_counter())
-    force = bool(payload.get("force"))
 
     existing = {b["billNo"] for b in get_all_bills()}
-    server_empty = len(existing) == 0
 
     for bill in bills:
         bill_no = bill.get("billNo") or bill.get("bill_no")
-        if not bill_no:
-            continue
-        if bill_no in existing and not (force and server_empty):
+        if not bill_no or bill_no in existing:
             continue
 
         create_bill(
@@ -934,126 +930,51 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
     if counter > get_bill_counter():
         set_bill_counter(counter)
 
-    return {"imported": imported, "billCounter": get_bill_counter(), "totalBills": len(get_all_bills())}
+    return {"imported": imported, "billCounter": get_bill_counter()}
 
 
-def _fetch_items_pg(cur: Any, bill_id: int) -> list[dict[str, Any]]:
-    cur.execute("SELECT * FROM bill_items WHERE bill_id = %s ORDER BY id", (bill_id,))
-    rows = cur.fetchall()
-    return [
-        {
-            "service": r["service"],
-            "category": r["category"],
-            "item": r["item"],
-            "qty": r["qty"],
-            "rate": r["rate"],
-            "amount": r["amount"],
-        }
-        for r in rows
-    ]
+def clear_all_data() -> dict[str, int]:
+    """Remove all bills, customers, expenditures, and generated invoices."""
+    from paths import invoice_dir
 
-
-def probe_postgres_storage() -> dict[str, Any]:
-    """Try every configured Postgres URL and report whether bills exist there."""
-    from db import _collect_postgres_urls, _postgres_connect_url
-
-    urls = _collect_postgres_urls()
-    if not urls:
-        return {"configured": False, "reachable": False, "billCount": 0, "errors": []}
-
-    try:
-        import psycopg2
-        from psycopg2.extras import RealDictCursor
-    except ImportError:
-        return {"configured": True, "reachable": False, "billCount": 0, "errors": ["psycopg2 not installed"]}
-
-    errors: list[str] = []
-    for url in urls:
-        try:
-            conn = psycopg2.connect(
-                _postgres_connect_url(url),
-                cursor_factory=RealDictCursor,
-                connect_timeout=15,
+    with get_connection() as conn:
+        if is_postgres():
+            conn.execute(
+                "TRUNCATE bill_items, bills, customers, expenditures RESTART IDENTITY CASCADE"
             )
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='bills')"
+        else:
+            conn.execute("DELETE FROM bill_items")
+            conn.execute("DELETE FROM bills")
+            conn.execute("DELETE FROM customers")
+            conn.execute("DELETE FROM expenditures")
+            conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('bills', 'bill_items', 'expenditures')")
+        row = conn.execute(
+            "SELECT 1 FROM settings WHERE key = ?", ("bill_counter",)
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = ?",
+                ("1", "bill_counter"),
             )
-            exists = cur.fetchone()
-            has_table = bool(exists["exists"] if isinstance(exists, dict) else exists[0])
-            count = 0
-            if has_table:
-                cur.execute("SELECT COUNT(*) AS c FROM bills")
-                row = cur.fetchone()
-                count = int(row["c"] if isinstance(row, dict) else row[0])
-            conn.close()
-            host = "internal" if "railway.internal" in url else "public"
-            return {
-                "configured": True,
-                "reachable": True,
-                "billCount": count,
-                "hostType": host,
-                "errors": errors,
-            }
-        except Exception as exc:
-            errors.append(str(exc)[:200])
-            continue
-
-    return {"configured": True, "reachable": False, "billCount": 0, "errors": errors}
-
-
-def recover_bills_from_postgres() -> dict[str, Any]:
-    """Pull bills from PostgreSQL (when reachable) into the active database."""
-    from db import _collect_postgres_urls, _postgres_connect_url
-
-    probe = probe_postgres_storage()
-    if not probe.get("reachable"):
-        return {
-            "ok": False,
-            "imported": 0,
-            "error": "Could not reach PostgreSQL. Fix DATABASE_URL on Railway first.",
-            "probe": probe,
-        }
-    if probe.get("billCount", 0) == 0:
-        return {
-            "ok": False,
-            "imported": 0,
-            "error": "PostgreSQL is reachable but contains no bills.",
-            "probe": probe,
-        }
-
-    try:
-        import psycopg2
-        from psycopg2.extras import RealDictCursor
-    except ImportError as exc:
-        return {"ok": False, "imported": 0, "error": str(exc), "probe": probe}
-
-    bills_payload: list[dict[str, Any]] = []
-    counter = 1
-    for url in _collect_postgres_urls():
-        try:
-            conn = psycopg2.connect(
-                _postgres_connect_url(url),
-                cursor_factory=RealDictCursor,
-                connect_timeout=15,
+        else:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?)",
+                ("bill_counter", "1"),
             )
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM bills ORDER BY id")
-            rows = cur.fetchall()
-            for row in rows:
-                items = _fetch_items_pg(cur, row["id"])
-                bills_payload.append(row_to_bill(row, items))
-            cur.execute("SELECT value FROM settings WHERE key = 'bill_counter'")
-            setting = cur.fetchone()
-            if setting:
-                counter = max(counter, int(setting["value"] if isinstance(setting, dict) else setting[0]))
-            conn.close()
-            break
-        except Exception:
-            continue
+        conn.commit()
 
-    if not bills_payload:
-        return {"ok": False, "imported": 0, "error": "No bills read from PostgreSQL.", "probe": probe}
+    removed_invoices = 0
+    inv_dir = invoice_dir()
+    if inv_dir.is_dir():
+        for path in inv_dir.glob("*.pdf"):
+            try:
+                path.unlink()
+                removed_invoices += 1
+            except OSError:
+                pass
 
-    result = migrate_from_local({"bills": bills_payload, "billCounter": counter, "force": True})
-    return {"ok": True, **result, "probe": probe}
+    return {
+        "billsDeleted": True,
+        "billCounterReset": 1,
+        "invoicesRemoved": removed_invoices,
+    }
