@@ -1963,7 +1963,7 @@ function renderWhatsAppConnectBody(status = null) {
         <img class="wa-qr-image" src="${status.qr}" alt="WhatsApp QR code" width="280" height="280">
       </div>
       ${errorHtml}
-      <p class="wa-connect-hint">QR refreshes every ~20 seconds. If scan fails, wait for a new code or click Reset Connection.</p>
+      <p class="wa-connect-hint">QR refreshes every ~20 seconds. Scan within 20 seconds of a fresh code.<br>If phone says <strong>Could not link device</strong>: update WhatsApp, remove old linked devices on your phone, click Reset Connection here, then scan the new QR.</p>
       <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
     `;
     bindWhatsAppResetButton();
