@@ -188,6 +188,9 @@ def _run_schema_migrations(conn: DbConnection) -> None:
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS shop_service_mode TEXT DEFAULT ''",
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT ''",
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS payment_info TEXT DEFAULT ''",
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS offer_id TEXT DEFAULT ''",
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS offer_purpose TEXT DEFAULT ''",
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS offer_details TEXT DEFAULT ''",
             "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_favorite INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT ''",
         ]
@@ -218,6 +221,13 @@ def _run_schema_migrations(conn: DbConnection) -> None:
         conn.execute(
             "ALTER TABLE bills ADD COLUMN payment_info TEXT DEFAULT ''"
         )
+    cols = conn.table_columns("bills")
+    if "offer_id" not in cols:
+        conn.execute("ALTER TABLE bills ADD COLUMN offer_id TEXT DEFAULT ''")
+    if "offer_purpose" not in cols:
+        conn.execute("ALTER TABLE bills ADD COLUMN offer_purpose TEXT DEFAULT ''")
+    if "offer_details" not in cols:
+        conn.execute("ALTER TABLE bills ADD COLUMN offer_details TEXT DEFAULT ''")
     customer_cols = conn.table_columns("customers")
     if "is_favorite" not in customer_cols:
         conn.execute(
@@ -399,6 +409,9 @@ def row_to_bill(row: Any, items: list[dict[str, Any]]) -> dict[str, Any]:
         "discountPercent": row["discount_percent"],
         "discountAmount": row["discount_amount"],
         "total": row["total"],
+        "offerId": (row["offer_id"] if "offer_id" in keys else "") or "",
+        "offerPurpose": (row["offer_purpose"] if "offer_purpose" in keys else "") or "",
+        "offerDetails": (row["offer_details"] if "offer_details" in keys else "") or "",
         "sentVia": row["sent_via"],
         "deliveryStatus": row["delivery_status"],
         "completedAt": row["completed_at"],
@@ -542,8 +555,9 @@ def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
                     home_service_mode, shop_service_mode,
                     payment_type, payment_info,
                     subtotal, discount_percent, discount_amount, total,
+                    offer_id, offer_purpose, offer_details,
                     sent_via, delivery_status, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     bill_no,
@@ -563,6 +577,9 @@ def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
                     payload.get("discountPercent", 0),
                     payload.get("discountAmount", 0),
                     payload.get("total", 0),
+                    payload.get("offerId", ""),
+                    payload.get("offerPurpose", ""),
+                    payload.get("offerDetails", ""),
                     payload.get("sentVia", "saved"),
                     payload.get("deliveryStatus", "pending"),
                     payload.get("completedAt"),
@@ -654,7 +671,10 @@ def update_bill(bill_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
                 subtotal = ?,
                 discount_percent = ?,
                 discount_amount = ?,
-                total = ?
+                total = ?,
+                offer_id = ?,
+                offer_purpose = ?,
+                offer_details = ?
             WHERE id = ?
             """,
             (
@@ -673,6 +693,9 @@ def update_bill(bill_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
                 payload.get("discountPercent", existing["discountPercent"]),
                 payload.get("discountAmount", existing["discountAmount"]),
                 payload.get("total", existing["total"]),
+                payload.get("offerId", existing.get("offerId", "")),
+                payload.get("offerPurpose", existing.get("offerPurpose", "")),
+                payload.get("offerDetails", existing.get("offerDetails", "")),
                 bill_id,
             ),
         )
@@ -980,6 +1003,9 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
                 "discountPercent": bill.get("discountPercent", 0),
                 "discountAmount": bill.get("discountAmount", 0),
                 "total": bill.get("total", 0),
+                "offerId": bill.get("offerId", ""),
+                "offerPurpose": bill.get("offerPurpose", ""),
+                "offerDetails": bill.get("offerDetails", ""),
                 "sentVia": bill.get("sentVia", "saved"),
                 "deliveryStatus": bill.get("deliveryStatus", "pending"),
                 "completedAt": bill.get("completedAt"),

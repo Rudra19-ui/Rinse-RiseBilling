@@ -40,6 +40,8 @@ const els = {
   subtotalAmount: $("#subtotalAmount"),
   discountPercent: $("#discountPercent"),
   discountAmount: $("#discountAmount"),
+  offerSelect: $("#offerSelect"),
+  offerSelectionHint: $("#offerSelectionHint"),
   printBtn: $("#printBtn"),
   whatsappBtn: $("#whatsappBtn"),
   saveBillBtn: $("#saveBillBtn"),
@@ -1641,6 +1643,109 @@ async function loadOffers(force = false) {
   return offersCache;
 }
 
+function getSelectedOffer() {
+  const id = els.offerSelect?.value || "";
+  if (!id) return null;
+  return offersCache.find((offer) => offer.id === id) || null;
+}
+
+function parseOfferDiscountPercent(offer) {
+  if (!offer) return 0;
+  const explicit = Number(offer.discountPercent);
+  if (!Number.isNaN(explicit) && explicit > 0) {
+    return Math.min(100, explicit);
+  }
+  const match = String(offer.details || "").match(/(\d+(?:\.\d+)?)\s*%/);
+  return match ? Math.min(100, parseFloat(match[1])) : 0;
+}
+
+function formatOfferWhatsAppBlock(source) {
+  const purpose = (source?.offerPurpose || source?.purpose || "").trim();
+  if (!purpose) return "";
+  const details = (source?.offerDetails || source?.details || "").trim();
+  let block = `*Offer: ${purpose}*\n`;
+  if (details) block += `${details}\n`;
+  return `${block}\n`;
+}
+
+function getSelectedOfferPayload() {
+  const offer = getSelectedOffer();
+  if (!offer) {
+    return { offerId: "", offerPurpose: "", offerDetails: "" };
+  }
+  return {
+    offerId: offer.id || "",
+    offerPurpose: offer.purpose || "",
+    offerDetails: offer.details || "",
+  };
+}
+
+async function refreshOfferSelect() {
+  await loadOffers(true);
+  const select = els.offerSelect;
+  if (!select) return;
+
+  const previous = select.value;
+  const active = offersCache.filter(isOfferActive);
+  const others = offersCache.filter((offer) => !isOfferActive(offer));
+
+  let html = '<option value="">No offer</option>';
+  if (active.length) {
+    html += '<optgroup label="Live now">';
+    active.forEach((offer) => {
+      html += `<option value="${escapeAttr(offer.id)}">${escapeHtml(offer.purpose)}</option>`;
+    });
+    html += "</optgroup>";
+  }
+  if (others.length) {
+    html += '<optgroup label="All offers">';
+    others.forEach((offer) => {
+      html += `<option value="${escapeAttr(offer.id)}">${escapeHtml(offer.purpose)}</option>`;
+    });
+    html += "</optgroup>";
+  }
+
+  select.innerHTML = html;
+  if (previous && offersCache.some((offer) => offer.id === previous)) {
+    select.value = previous;
+  }
+  updateOfferSelectionHint();
+}
+
+function updateOfferSelectionHint() {
+  const hint = els.offerSelectionHint;
+  if (!hint) return;
+  const offer = getSelectedOffer();
+  if (!offer) {
+    hint.textContent = "";
+    hint.classList.add("hidden");
+    return;
+  }
+  const parts = [];
+  if (offer.details) parts.push(offer.details);
+  if (isOfferActive(offer)) parts.push("Live today");
+  else if (offer.offerStart && offer.offerEnd) {
+    parts.push(formatOfferSchedule(offer));
+  }
+  hint.textContent = parts.join(" · ");
+  hint.classList.toggle("hidden", !parts.length);
+}
+
+function handleOfferSelectChange() {
+  const offer = getSelectedOffer();
+  if (offer) {
+    const percent = parseOfferDiscountPercent(offer);
+    if (percent > 0) els.discountPercent.value = String(percent);
+  }
+  updateOfferSelectionHint();
+  updateTotals();
+}
+
+function clearOfferSelection() {
+  if (els.offerSelect) els.offerSelect.value = "";
+  updateOfferSelectionHint();
+}
+
 function createEmptyOffer() {
   return {
     id: "",
@@ -1940,6 +2045,7 @@ function exitOffersManageMode() {
   if (els.offersModalBody) els.offersModalBody.dataset.mode = "";
   updateOffersManageControls();
   renderOffersModalBody();
+  refreshOfferSelect();
 }
 
 async function openOffersModal() {
@@ -1963,6 +2069,7 @@ function closeOffersModal() {
   els.offersModal.setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
   updateOffersManageControls();
+  refreshOfferSelect();
 }
 
 function formatDeliveryScheduleFromBill(bill) {
@@ -1992,16 +2099,12 @@ function buildWhatsAppBillMessage(bill) {
     `*Items:*\n`;
 
   (bill.items || []).forEach((item, i) => {
-    const amount = item.rate * item.qty;
     message += `${i + 1}. ${item.name}\n`;
-    message += `   ${formatQtyRateLine(item).replace("\u20B9", "Rs. ")} = *${formatCurrency(amount).replace("\u20B9", "Rs. ")}*\n`;
   });
 
   message += `\n`;
-  if (bill.discountAmount > 0) {
-    message += `Subtotal: ${formatCurrency(bill.subtotal).replace("\u20B9", "Rs. ")}\n`;
-    message += `Discount (${bill.discountPercent}%): − ${formatCurrency(bill.discountAmount).replace("\u20B9", "Rs. ")}\n`;
-  }
+  const offerBlock = formatOfferWhatsAppBlock(bill);
+  if (offerBlock) message += offerBlock;
   message +=
     `*TOTAL: ${total}*\n\n` +
     `Thank you for choosing us!\n` +
@@ -2412,9 +2515,6 @@ async function resetWhatsAppConnection() {
 
 function buildBillMessage() {
   const name = els.customerName.value.trim() || "Customer";
-  const subtotal = getSubtotal();
-  const discount = getDiscountAmount();
-  const percent = getDiscountPercent();
   const total = getTotal();
   const billNo = String(billCounter).padStart(4, "0");
   const date = formatDate(new Date());
@@ -2429,17 +2529,12 @@ function buildBillMessage() {
   message += `*Items:*\n`;
 
   billItems.forEach((item, i) => {
-    const amount = item.rate * item.qty;
     message += `${i + 1}. ${item.name}\n`;
-    message += `   ${formatQtyRateLine(item)} = *${formatCurrency(amount)}*\n`;
-    message += `   (${item.service})\n`;
   });
 
   message += `\n━━━━━━━━━━━━━━━━\n`;
-  if (discount > 0) {
-    message += `Subtotal: ${formatCurrency(subtotal)}\n`;
-    message += `Discount (${percent}%): − ${formatCurrency(discount)}\n`;
-  }
+  const offerBlock = formatOfferWhatsAppBlock(getSelectedOffer());
+  if (offerBlock) message += offerBlock;
   message += `*TOTAL: ${formatCurrency(total)}*\n\n`;
   message += `Thank you for choosing us!\n`;
   message += `Free Pickup & Delivery\n`;
@@ -2493,6 +2588,7 @@ function buildCurrentBillPayload(sentVia) {
     discountPercent: getDiscountPercent(),
     discountAmount: getDiscountAmount(),
     total: getTotal(),
+    ...getSelectedOfferPayload(),
     sentVia,
     deliveryStatus: "pending",
     completedAt: null,
@@ -3867,17 +3963,12 @@ function buildMessageFromRecord(bill) {
   message += `*Items:*\n`;
 
   bill.items.forEach((item, i) => {
-    const amount = item.rate * item.qty;
     message += `${i + 1}. ${item.name}\n`;
-    message += `   ${formatQtyRateLine(item)} = *${formatCurrency(amount)}*\n`;
-    message += `   (${item.service})\n`;
   });
 
   message += `\n━━━━━━━━━━━━━━━━\n`;
-  if (bill.discountAmount > 0) {
-    message += `Subtotal: ${formatCurrency(bill.subtotal)}\n`;
-    message += `Discount (${bill.discountPercent}%): − ${formatCurrency(bill.discountAmount)}\n`;
-  }
+  const offerBlock = formatOfferWhatsAppBlock(bill);
+  if (offerBlock) message += offerBlock;
   message += `*TOTAL: ${formatCurrency(bill.total)}*\n\n`;
   message += `Thank you for choosing us!\n`;
   message += `Free Pickup & Delivery\n`;
@@ -3925,6 +4016,7 @@ function resetBillForm() {
   els.customerName.value = "";
   els.customerPhone.value = "";
   els.discountPercent.value = "0";
+  clearOfferSelection();
   updateProfileHint(null);
   updateFavoriteUi(false, false);
   setDefaultDeliveryDateTime();
@@ -3952,6 +4044,7 @@ function renderBill() {
     tbody.innerHTML =
       '<tr class="empty-row"><td colspan="7">No items added yet</td></tr>';
     els.discountPercent.value = "0";
+    clearOfferSelection();
     updateTotals();
     updateActionButtons();
     return;
@@ -4044,10 +4137,19 @@ function buildReceipt() {
   const percent = getDiscountPercent();
 
   els.rSummary.innerHTML = "";
-  if (discount > 0) {
+  const offer = getSelectedOffer();
+  if (offer) {
     els.rSummary.innerHTML = `
+      <p class="offer-line"><span>Offer</span><span>${escapeHtml(offer.purpose)}</span></p>
+    `;
+  }
+  if (discount > 0) {
+    const discountLabel = offer?.purpose
+      ? `Discount (${offer.purpose}, ${percent}%)`
+      : `Discount (${percent}%)`;
+    els.rSummary.innerHTML += `
       <p><span>Subtotal</span><span>${formatCurrency(subtotal)}</span></p>
-      <p class="discount-line"><span>Discount (${percent}%)</span><span>− ${formatCurrency(discount)}</span></p>
+      <p class="discount-line"><span>${escapeHtml(discountLabel)}</span><span>− ${formatCurrency(discount)}</span></p>
     `;
   }
 
@@ -4146,6 +4248,7 @@ async function init() {
   setDefaultServiceModes();
   populateServices();
   renderBill();
+  await refreshOfferSelect();
   startBillDateClock();
 
   try {
@@ -4171,7 +4274,16 @@ async function init() {
   });
   els.categorySelect.addEventListener("change", onCategoryChange);
   els.itemSearch.addEventListener("input", (e) => searchItems(e.target.value));
-  els.discountPercent.addEventListener("input", updateTotals);
+  els.discountPercent.addEventListener("input", () => {
+    const offer = getSelectedOffer();
+    if (offer) {
+      const expected = parseOfferDiscountPercent(offer);
+      const current = getDiscountPercent();
+      if (Math.abs(current - expected) > 0.01) clearOfferSelection();
+    }
+    updateTotals();
+  });
+  els.offerSelect?.addEventListener("change", handleOfferSelectChange);
   els.deliveryDate.addEventListener("change", updateDeliveryDisplay);
   bindToggleableServiceModeRadios("homeServiceMode", handleHomeServiceModeChange);
   bindToggleableServiceModeRadios("shopServiceMode", handleShopServiceModeChange);

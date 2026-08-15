@@ -1432,6 +1432,41 @@ select:disabled {
   border-bottom: 1px dashed var(--cream-dark);
 }
 
+.offer-row {
+  grid-template-columns: 1fr 2fr;
+  padding-bottom: 0.15rem;
+}
+
+.offer-select {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 2px solid var(--cream-dark);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--black);
+}
+
+.offer-select:focus {
+  outline: none;
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px rgba(242, 101, 34, 0.15);
+}
+
+.offer-selection-hint {
+  margin: -0.15rem 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--orange-dark, #c45a1a);
+  text-align: right;
+}
+
+.offer-line span:last-child {
+  color: var(--orange-dark, #c45a1a);
+  font-weight: 700;
+}
+
 .discount-input-wrap {
   display: flex;
   align-items: center;

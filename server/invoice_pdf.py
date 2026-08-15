@@ -177,15 +177,23 @@ def format_bill_date(value: str | None) -> str:
     return dt.strftime("%d %b %Y, %I:%M %p").replace("AM", "am").replace("PM", "pm")
 
 
+def _offer_whatsapp_lines(bill: dict[str, Any]) -> list[str]:
+    purpose = (bill.get("offerPurpose") or "").strip()
+    if not purpose:
+        return []
+    details = (bill.get("offerDetails") or "").strip()
+    lines = [f"*Offer: {purpose}*"]
+    if details:
+        lines.append(details)
+    return lines
+
+
 def build_whatsapp_message(bill: dict[str, Any]) -> str:
     bill = normalize_bill_for_pdf(bill)
     name = (bill.get("customerName") or "Customer").strip()
     delivery = format_delivery_schedule(bill)
     total = format_currency(bill.get("total", 0))
     bill_no = bill.get("billNo", "")
-    subtotal = float(bill.get("subtotal") or 0)
-    discount = float(bill.get("discountAmount") or 0)
-    discount_pct = float(bill.get("discountPercent") or 0)
 
     lines = [
         f"Hi {name},",
@@ -199,14 +207,13 @@ def build_whatsapp_message(bill: dict[str, Any]) -> str:
     ]
 
     for i, item in enumerate(bill.get("items") or [], 1):
-        amount = float(item.get("rate") or 0) * float(item.get("qty") or 0)
         lines.append(f"{i}. {item.get('name', '-')}")
-        lines.append(f"   {format_qty_rate_line(item)} = *{format_currency(amount)}*")
 
     lines.append("")
-    if discount > 0:
-        lines.append(f"Subtotal: {format_currency(subtotal)}")
-        lines.append(f"Discount ({discount_pct:.0f}%): - {format_currency(discount)}")
+    offer_lines = _offer_whatsapp_lines(bill)
+    if offer_lines:
+        lines.extend(offer_lines)
+        lines.append("")
     lines.append(f"*TOTAL: {total}*")
     lines.extend(
         [
