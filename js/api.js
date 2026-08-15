@@ -119,6 +119,17 @@ const API = {
     return this.request("/api/reports/overall");
   },
 
+  getOffers() {
+    return this.request("/api/offers");
+  },
+
+  saveOffers(offers, password) {
+    return this.request("/api/offers", {
+      method: "PUT",
+      body: JSON.stringify({ offers, password }),
+    });
+  },
+
   getWhatsAppStatus(startBridge = false) {
     const qs = startBridge ? "?start=1" : "";
     return this.request(`/api/whatsapp/status${qs}`);

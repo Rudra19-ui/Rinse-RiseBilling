@@ -503,12 +503,16 @@
   <div id="offersModal" class="modal hidden" role="dialog" aria-labelledby="offersModalTitle">
     <div class="modal-backdrop" id="offersModalBackdrop"></div>
     <div class="modal-content offers-modal">
-      <div class="modal-header">
+      <div class="modal-header offers-modal-header">
         <div>
           <h3 id="offersModalTitle">Seasonal Offers</h3>
-          <p class="modal-subtitle">Indian festivals &amp; scheduled offer dates</p>
+          <p class="modal-subtitle">Festivals, events &amp; scheduled offer dates</p>
         </div>
-        <button type="button" class="modal-close" id="closeOffersModal" aria-label="Close">×</button>
+        <div class="offers-modal-actions">
+          <button type="button" class="btn btn-outline btn-sm hidden" id="offersDoneManageBtn">Done</button>
+          <button type="button" class="btn btn-outline btn-sm" id="offersManageBtn">Manage</button>
+          <button type="button" class="modal-close" id="closeOffersModal" aria-label="Close">×</button>
+        </div>
       </div>
       <div class="modal-body" id="offersModalBody">
         <p class="offers-loading">Loading offers…</p>
@@ -566,6 +570,6 @@
   <script src="js/api.js?v=202608094"></script>
   <script src="js/invoice-pdf.js?v=20260809"></script>
   <script src="js/history-export.js?v=20260809"></script>
-  <script src="js/app.js?v=202608152"></script>
+  <script src="js/app.js?v=202608153"></script>
 </body>
 </html>

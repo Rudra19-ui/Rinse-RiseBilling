@@ -1,6 +1,7 @@
 {
   "offers": [
     {
+      "id": "953fa328-3bd2-4eef-b296-6f8e4cc63bf3",
       "purpose": "Republic Day",
       "eventDate": "2026-01-26",
       "offerStart": "2026-01-24",
@@ -8,6 +9,7 @@
       "details": "10% off on steam iron & laundry"
     },
     {
+      "id": "094285a9-15c0-4464-95dc-e23a0c46b548",
       "purpose": "Holi",
       "eventDate": "2026-03-14",
       "offerStart": "2026-03-12",
@@ -15,6 +17,7 @@
       "details": "Free pickup on orders above ₹500"
     },
     {
+      "id": "b76c0770-132a-418e-b198-43361028d798",
       "purpose": "Independence Day",
       "eventDate": "2026-08-15",
       "offerStart": "2026-08-13",
@@ -22,6 +25,7 @@
       "details": "15% off on all laundry services"
     },
     {
+      "id": "ae49eb3f-3069-4d14-bbaf-78d209da9f23",
       "purpose": "Rakshabandhan",
       "eventDate": "2026-08-28",
       "offerStart": "2026-08-26",
@@ -29,6 +33,7 @@
       "details": "12% off on premium laundry & dry cleaning"
     },
     {
+      "id": "de88e631-bdec-43c4-b3af-aeadca3f725f",
       "purpose": "Gandhi Jayanti",
       "eventDate": "2026-10-02",
       "offerStart": "2026-10-01",
@@ -36,6 +41,7 @@
       "details": "10% off on wash & fold"
     },
     {
+      "id": "b4ec7e6d-f36e-419b-be77-991ec263be17",
       "purpose": "Diwali",
       "eventDate": "2026-11-08",
       "offerStart": "2026-11-05",
@@ -43,6 +49,7 @@
       "details": "20% off on dry cleaning & shoe cleaning"
     },
     {
+      "id": "f3d589df-a998-465a-964f-4f0bc059f1d6",
       "purpose": "Christmas",
       "eventDate": "2026-12-25",
       "offerStart": "2026-12-23",
@@ -50,6 +57,7 @@
       "details": "Festive discount on all services"
     },
     {
+      "id": "de8faf45-8e5f-407f-8c67-87fc771044f4",
       "purpose": "New Year",
       "eventDate": "2027-01-01",
       "offerStart": "2026-12-30",

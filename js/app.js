@@ -107,10 +107,14 @@ const els = {
   offersModalBackdrop: $("#offersModalBackdrop"),
   offersModalBody: $("#offersModalBody"),
   closeOffersModal: $("#closeOffersModal"),
+  offersManageBtn: $("#offersManageBtn"),
+  offersDoneManageBtn: $("#offersDoneManageBtn"),
 };
 
 const EXPENDITURE_PASSWORD = "Mandleshwar@22";
 let offersCache = [];
+let offersEditUnlocked = false;
+let offersEditingId = null;
 
 function formatCurrency(amount) {
   return "₹" + amount.toLocaleString("en-IN");
@@ -1622,11 +1626,10 @@ function formatOfferSchedule(offer) {
   return `${formatDeliveryDateOnly(offer.offerStart)} – ${formatDeliveryDateOnly(offer.offerEnd)}`;
 }
 
-async function loadOffers() {
-  if (offersCache.length) return offersCache;
+async function loadOffers(force = false) {
+  if (!force && offersCache.length) return offersCache;
   try {
-    const res = await fetch("data/offers.json");
-    const data = await res.json();
+    const data = await API.getOffers();
     offersCache = (data.offers || []).slice().sort((a, b) => {
       const ad = parseDateOnly(a.eventDate)?.getTime() ?? 0;
       const bd = parseDateOnly(b.eventDate)?.getTime() ?? 0;
@@ -1638,49 +1641,305 @@ async function loadOffers() {
   return offersCache;
 }
 
+function createEmptyOffer() {
+  return {
+    id: "",
+    purpose: "",
+    eventDate: "",
+    offerStart: "",
+    offerEnd: "",
+    details: "",
+  };
+}
+
+function renderOfferFormHtml(offer, { formId, submitLabel, showCancel = false, extraFormClass = "" }) {
+  const formClass = ["offer-form", extraFormClass].filter(Boolean).join(" ");
+  return `
+    <form class="${formClass}" id="${formId}" data-offer-id="${escapeAttr(offer.id || "")}">
+      <div class="offer-form-grid">
+        <label>
+          Offer name
+          <input type="text" name="purpose" value="${escapeAttr(offer.purpose)}" placeholder="e.g. Diwali, Summer sale" required maxlength="120">
+        </label>
+        <label>
+          Event date
+          <input type="date" name="eventDate" value="${escapeAttr(offer.eventDate)}" required>
+        </label>
+        <label>
+          Offer starts
+          <input type="date" name="offerStart" value="${escapeAttr(offer.offerStart)}" required>
+        </label>
+        <label>
+          Offer ends
+          <input type="date" name="offerEnd" value="${escapeAttr(offer.offerEnd)}" required>
+        </label>
+        <label class="offer-form-full">
+          Offer details
+          <textarea name="details" rows="2" maxlength="500" placeholder="e.g. 15% off on all laundry">${escapeHtml(offer.details || "")}</textarea>
+        </label>
+      </div>
+      <div class="offer-form-actions">
+        ${showCancel ? '<button type="button" class="btn btn-outline offer-form-cancel">Cancel</button>' : ""}
+        <button type="submit" class="btn btn-primary">${escapeHtml(submitLabel)}</button>
+      </div>
+    </form>
+  `;
+}
+
+function readOfferForm(form) {
+  const fd = new FormData(form);
+  const existingId = form.dataset.offerId || "";
+  return {
+    id: existingId || crypto.randomUUID(),
+    purpose: String(fd.get("purpose") || "").trim(),
+    eventDate: String(fd.get("eventDate") || "").trim(),
+    offerStart: String(fd.get("offerStart") || "").trim(),
+    offerEnd: String(fd.get("offerEnd") || "").trim(),
+    details: String(fd.get("details") || "").trim(),
+  };
+}
+
+async function persistOffers(nextOffers) {
+  const data = await API.saveOffers(nextOffers, EXPENDITURE_PASSWORD);
+  offersCache = (data.offers || []).slice().sort((a, b) => {
+    const ad = parseDateOnly(a.eventDate)?.getTime() ?? 0;
+    const bd = parseDateOnly(b.eventDate)?.getTime() ?? 0;
+    return ad - bd;
+  });
+}
+
+function updateOffersManageControls() {
+  const inPasswordGate = els.offersModalBody?.dataset.mode === "password";
+  els.offersManageBtn?.classList.toggle("hidden", offersEditUnlocked || inPasswordGate);
+  els.offersDoneManageBtn?.classList.toggle("hidden", !offersEditUnlocked);
+}
+
+function renderOffersPasswordGate() {
+  return `
+    <div class="offers-password-gate">
+      <p class="offers-password-note">Enter shop password to add or edit offers.</p>
+      <form id="offersPasswordForm" class="offers-password-form">
+        <label>
+          Password
+          <input type="password" id="offersPasswordInput" autocomplete="current-password" required>
+        </label>
+        <p id="offersPasswordError" class="offers-password-error hidden">Incorrect password. Try again.</p>
+        <div class="offer-form-actions">
+          <button type="button" class="btn btn-outline" id="offersPasswordCancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Unlock</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function bindOffersPasswordGate() {
+  const form = document.getElementById("offersPasswordForm");
+  const input = document.getElementById("offersPasswordInput");
+  const error = document.getElementById("offersPasswordError");
+  document.getElementById("offersPasswordCancel")?.addEventListener("click", () => {
+    if (els.offersModalBody) els.offersModalBody.dataset.mode = "";
+    updateOffersManageControls();
+    renderOffersModalBody();
+  });
+  form?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const entered = input?.value || "";
+    if (entered !== EXPENDITURE_PASSWORD) {
+      error?.classList.remove("hidden");
+      input?.select();
+      return;
+    }
+    offersEditUnlocked = true;
+    offersEditingId = null;
+    error?.classList.add("hidden");
+    updateOffersManageControls();
+    renderOffersModalBody();
+  });
+  requestAnimationFrame(() => input?.focus());
+}
+
+function bindOfferForm(form, { onSubmit, onCancel }) {
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const offer = readOfferForm(form);
+    if (!offer.purpose) {
+      alert("Please enter an offer name.");
+      return;
+    }
+    if (!offer.eventDate || !offer.offerStart || !offer.offerEnd) {
+      alert("Please fill in all dates.");
+      return;
+    }
+    try {
+      await onSubmit(offer);
+    } catch (err) {
+      alert("Could not save offer: " + err.message);
+    }
+  });
+  form.querySelector(".offer-form-cancel")?.addEventListener("click", () => {
+    offersEditingId = null;
+    onCancel?.();
+  });
+}
+
+function bindOffersModalActions() {
+  const body = els.offersModalBody;
+  if (!body) return;
+
+  if (offersEditUnlocked) {
+    const addForm = body.querySelector("#offerAddForm");
+    if (addForm) {
+      bindOfferForm(addForm, {
+        async onSubmit(offer) {
+          await persistOffers([...offersCache, offer]);
+          offersEditingId = null;
+          renderOffersModalBody();
+        },
+      });
+    }
+
+    body.querySelectorAll(".offer-edit-form").forEach((form) => {
+      bindOfferForm(form, {
+        async onSubmit(offer) {
+          const next = offersCache.map((item) => (item.id === offer.id ? offer : item));
+          await persistOffers(next);
+          offersEditingId = null;
+          renderOffersModalBody();
+        },
+        onCancel: renderOffersModalBody,
+      });
+    });
+
+    body.querySelectorAll(".offer-edit-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        offersEditingId = btn.dataset.id || null;
+        renderOffersModalBody();
+      });
+    });
+
+    body.querySelectorAll(".offer-delete-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.id;
+        const offer = offersCache.find((item) => item.id === id);
+        if (!offer) return;
+        if (!confirm(`Remove "${offer.purpose}" from the offer list?`)) return;
+        try {
+          await persistOffers(offersCache.filter((item) => item.id !== id));
+          if (offersEditingId === id) offersEditingId = null;
+          renderOffersModalBody();
+        } catch (err) {
+          alert("Could not remove offer: " + err.message);
+        }
+      });
+    });
+    return;
+  }
+
+  if (body.dataset.mode === "password") {
+    bindOffersPasswordGate();
+  }
+}
+
 function renderOffersModalBody() {
   const body = els.offersModalBody;
   if (!body) return;
 
-  if (!offersCache.length) {
-    body.innerHTML =
-      '<p class="offers-empty">No offers listed yet. Add entries in <code>data/offers.json</code>.</p>';
+  updateOffersManageControls();
+
+  if (!offersEditUnlocked && body.dataset.mode === "password") {
+    body.innerHTML = renderOffersPasswordGate();
+    bindOffersModalActions();
     return;
   }
 
   const activeCount = offersCache.filter(isOfferActive).length;
+  const editSections = offersEditUnlocked
+    ? `
+      <section class="offers-manage-section">
+        <h4 class="offers-section-title">Add new offer</h4>
+        ${renderOfferFormHtml(createEmptyOffer(), { formId: "offerAddForm", submitLabel: "Add offer" })}
+      </section>
+    `
+    : "";
+
+  const listHtml = offersCache.length
+    ? `
+      <div class="offers-list">
+        ${offersCache
+          .map((offer) => {
+            if (offersEditUnlocked && offersEditingId === offer.id) {
+              return `
+                <article class="offer-card offer-card-editing">
+                  <h4 class="offer-purpose">Edit offer</h4>
+                  ${renderOfferFormHtml(offer, {
+                    formId: `offerEditForm-${offer.id}`,
+                    submitLabel: "Save changes",
+                    showCancel: true,
+                    extraFormClass: "offer-edit-form",
+                  })}
+                </article>`;
+            }
+
+            return `
+              <article class="offer-card${isOfferActive(offer) ? " offer-card-active" : ""}">
+                <div class="offer-card-head">
+                  <h4 class="offer-purpose">${escapeHtml(offer.purpose)}</h4>
+                  <div class="offer-card-actions">
+                    ${isOfferActive(offer) ? '<span class="offer-badge">Live now</span>' : ""}
+                    ${
+                      offersEditUnlocked
+                        ? `
+                      <button type="button" class="btn btn-outline btn-xs offer-edit-btn" data-id="${escapeAttr(offer.id)}">Edit</button>
+                      <button type="button" class="btn btn-outline btn-xs offer-delete-btn" data-id="${escapeAttr(offer.id)}">Remove</button>`
+                        : ""
+                    }
+                  </div>
+                </div>
+                <dl class="offer-meta">
+                  <div class="offer-meta-row">
+                    <dt>Event date</dt>
+                    <dd>${escapeHtml(formatDeliveryDateOnly(offer.eventDate))}</dd>
+                  </div>
+                  <div class="offer-meta-row">
+                    <dt>Offer schedule</dt>
+                    <dd>${escapeHtml(formatOfferSchedule(offer))}</dd>
+                  </div>
+                  ${
+                    offer.details
+                      ? `<div class="offer-meta-row offer-details-row"><dt>Offer</dt><dd>${escapeHtml(offer.details)}</dd></div>`
+                      : ""
+                  }
+                </dl>
+              </article>`;
+          })
+          .join("")}
+      </div>
+    `
+    : `<p class="offers-empty">${offersEditUnlocked ? "No offers yet. Add your first offer above." : "No offers listed yet."}</p>`;
 
   body.innerHTML = `
-    ${activeCount ? `<p class="offers-active-note">${activeCount} offer${activeCount === 1 ? "" : "s"} live today</p>` : ""}
-    <div class="offers-list">
-      ${offersCache
-        .map(
-          (offer) => `
-        <article class="offer-card${isOfferActive(offer) ? " offer-card-active" : ""}">
-          <div class="offer-card-head">
-            <h4 class="offer-purpose">${escapeHtml(offer.purpose)}</h4>
-            ${isOfferActive(offer) ? '<span class="offer-badge">Live now</span>' : ""}
-          </div>
-          <dl class="offer-meta">
-            <div class="offer-meta-row">
-              <dt>Event date</dt>
-              <dd>${escapeHtml(formatDeliveryDateOnly(offer.eventDate))}</dd>
-            </div>
-            <div class="offer-meta-row">
-              <dt>Offer schedule</dt>
-              <dd>${escapeHtml(formatOfferSchedule(offer))}</dd>
-            </div>
-            ${
-              offer.details
-                ? `<div class="offer-meta-row offer-details-row"><dt>Offer</dt><dd>${escapeHtml(offer.details)}</dd></div>`
-                : ""
-            }
-          </dl>
-        </article>`
-        )
-        .join("")}
-    </div>
+    ${activeCount && !offersEditUnlocked ? `<p class="offers-active-note">${activeCount} offer${activeCount === 1 ? "" : "s"} live today</p>` : ""}
+    ${editSections}
+    ${offersCache.length || offersEditUnlocked ? `<h4 class="offers-section-title${offersEditUnlocked ? " offers-section-title-spaced" : ""}">${offersEditUnlocked ? "Current offers" : "Scheduled offers"}</h4>` : ""}
+    ${listHtml}
   `;
+
+  bindOffersModalActions();
+}
+
+function requestOffersManageAccess() {
+  if (!els.offersModalBody) return;
+  els.offersModalBody.dataset.mode = "password";
+  renderOffersModalBody();
+}
+
+function exitOffersManageMode() {
+  offersEditUnlocked = false;
+  offersEditingId = null;
+  if (els.offersModalBody) els.offersModalBody.dataset.mode = "";
+  updateOffersManageControls();
+  renderOffersModalBody();
 }
 
 async function openOffersModal() {
@@ -1691,15 +1950,19 @@ async function openOffersModal() {
   if (els.offersModalBody) {
     els.offersModalBody.innerHTML = '<p class="offers-loading">Loading offers…</p>';
   }
-  await loadOffers();
+  await loadOffers(true);
   renderOffersModalBody();
 }
 
 function closeOffersModal() {
   if (!els.offersModal) return;
+  offersEditUnlocked = false;
+  offersEditingId = null;
+  if (els.offersModalBody) els.offersModalBody.dataset.mode = "";
   els.offersModal.classList.add("hidden");
   els.offersModal.setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
+  updateOffersManageControls();
 }
 
 function formatDeliveryScheduleFromBill(bill) {
@@ -3958,6 +4221,8 @@ async function init() {
   els.closeWhatsAppConnect?.addEventListener("click", closeWhatsAppConnectModal);
   els.whatsappConnectBackdrop?.addEventListener("click", closeWhatsAppConnectModal);
   els.offersBtn?.addEventListener("click", openOffersModal);
+  els.offersManageBtn?.addEventListener("click", requestOffersManageAccess);
+  els.offersDoneManageBtn?.addEventListener("click", exitOffersManageMode);
   els.closeOffersModal?.addEventListener("click", closeOffersModal);
   els.offersModalBackdrop?.addEventListener("click", closeOffersModal);
   refreshWhatsAppStatus();

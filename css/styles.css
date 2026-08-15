@@ -2910,6 +2910,145 @@ select:disabled {
   font-weight: 600;
 }
 
+.offers-modal-header {
+  align-items: flex-start;
+}
+
+.offers-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.btn-xs {
+  font-size: 0.68rem;
+  padding: 0.2rem 0.45rem;
+  line-height: 1.2;
+}
+
+.offer-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.offers-section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 0.65rem;
+}
+
+.offers-section-title-spaced {
+  margin-top: 1rem;
+}
+
+.offers-manage-section {
+  margin-bottom: 0.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px dashed var(--cream-dark);
+}
+
+.offer-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.offer-form-full {
+  grid-column: 1 / -1;
+}
+
+.offer-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.offer-form input,
+.offer-form textarea {
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  padding: 0.45rem 0.55rem;
+  border: 2px solid var(--cream-dark);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--black);
+}
+
+.offer-form textarea {
+  resize: vertical;
+  min-height: 3rem;
+}
+
+.offer-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.offer-card-editing {
+  border-color: var(--orange);
+}
+
+.offers-password-gate {
+  padding: 0.5rem 0 1rem;
+}
+
+.offers-password-note {
+  color: var(--text-muted);
+  text-align: center;
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+}
+
+.offers-password-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.offers-password-form input {
+  padding: 0.55rem 0.65rem;
+  border: 2px solid var(--cream-dark);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+}
+
+.offers-password-error {
+  color: #c62828;
+  font-size: 0.85rem;
+  margin: -0.35rem 0 0.65rem;
+}
+
+@media (max-width: 560px) {
+  .offer-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .overall-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

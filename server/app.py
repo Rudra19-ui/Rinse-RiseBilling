@@ -43,6 +43,7 @@ from database import (
     mark_bill_sent_via,
 )
 from invoice_pdf import build_whatsapp_message, generate_invoice_pdf, invoice_filename
+from offers import get_offers, save_offers
 from whatsapp_send import (
     bridge_is_running,
     get_bridge_status,
@@ -357,6 +358,28 @@ def api_migrate():
     data = request.get_json(force=True, silent=True) or {}
     result = migrate_from_local(data)
     return jsonify(result)
+
+
+@app.route("/api/offers", methods=["GET"])
+def api_get_offers():
+    return jsonify({"offers": get_offers()})
+
+
+@app.route("/api/offers", methods=["PUT"])
+def api_save_offers():
+    data = request.get_json(force=True, silent=True) or {}
+    password = (data.get("password") or request.headers.get("X-Offers-Password") or "").strip()
+    expected = os.environ.get("OFFERS_EDIT_PASSWORD", os.environ.get("CLEAR_DATA_PASSWORD", "Mandleshwar@22")).strip()
+    if not password or password != expected:
+        return jsonify({"error": "Invalid password"}), 403
+    raw_offers = data.get("offers")
+    if not isinstance(raw_offers, list):
+        return jsonify({"error": "Offers must be a list."}), 400
+    try:
+        offers = save_offers(raw_offers)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"offers": offers})
 
 
 @app.route("/api/admin/clear-data", methods=["POST"])
