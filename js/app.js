@@ -1680,32 +1680,81 @@ function getSelectedOfferPayload() {
   };
 }
 
-async function refreshOfferSelect() {
-  await loadOffers(true);
-  const select = els.offerSelect;
-  if (!select) return;
-
-  const previous = select.value;
+function buildOfferSelectOptions(selectedId = "") {
   const active = offersCache.filter(isOfferActive);
   const others = offersCache.filter((offer) => !isOfferActive(offer));
 
-  let html = '<option value="">No offer</option>';
+  let html = `<option value=""${selectedId ? "" : " selected"}>No offer</option>`;
   if (active.length) {
     html += '<optgroup label="Live now">';
     active.forEach((offer) => {
-      html += `<option value="${escapeAttr(offer.id)}">${escapeHtml(offer.purpose)}</option>`;
+      const selected = offer.id === selectedId ? " selected" : "";
+      html += `<option value="${escapeAttr(offer.id)}"${selected}>${escapeHtml(offer.purpose)}</option>`;
     });
     html += "</optgroup>";
   }
   if (others.length) {
     html += '<optgroup label="All offers">';
     others.forEach((offer) => {
-      html += `<option value="${escapeAttr(offer.id)}">${escapeHtml(offer.purpose)}</option>`;
+      const selected = offer.id === selectedId ? " selected" : "";
+      html += `<option value="${escapeAttr(offer.id)}"${selected}>${escapeHtml(offer.purpose)}</option>`;
     });
     html += "</optgroup>";
   }
+  return html;
+}
 
-  select.innerHTML = html;
+function getOfferFromDraft(draft) {
+  if (!draft?.offerId) return null;
+  return (
+    offersCache.find((offer) => offer.id === draft.offerId) || {
+      id: draft.offerId,
+      purpose: draft.offerPurpose || "",
+      details: draft.offerDetails || "",
+    }
+  );
+}
+
+function applyOfferToDraft(draft, offer) {
+  if (!offer) {
+    draft.offerId = "";
+    draft.offerPurpose = "";
+    draft.offerDetails = "";
+    return;
+  }
+  draft.offerId = offer.id || "";
+  draft.offerPurpose = offer.purpose || "";
+  draft.offerDetails = offer.details || "";
+  const percent = parseOfferDiscountPercent(offer);
+  if (percent > 0) draft.discountPercent = percent;
+}
+
+function formatOfferHintText(offer) {
+  if (!offer) return "";
+  const parts = [];
+  if (offer.details) parts.push(offer.details);
+  if (isOfferActive(offer)) parts.push("Live today");
+  else if (offer.offerStart && offer.offerEnd) {
+    parts.push(formatOfferSchedule(offer));
+  }
+  return parts.join(" · ");
+}
+
+function updateHistoryEditOfferHint(draft) {
+  const hint = els.historyDetail?.querySelector("#historyEditOfferHint");
+  if (!hint) return;
+  const text = formatOfferHintText(getOfferFromDraft(draft));
+  hint.textContent = text;
+  hint.classList.toggle("hidden", !text);
+}
+
+async function refreshOfferSelect() {
+  await loadOffers(true);
+  const select = els.offerSelect;
+  if (!select) return;
+
+  const previous = select.value;
+  select.innerHTML = buildOfferSelectOptions(previous);
   if (previous && offersCache.some((offer) => offer.id === previous)) {
     select.value = previous;
   }
@@ -1721,14 +1770,9 @@ function updateOfferSelectionHint() {
     hint.classList.add("hidden");
     return;
   }
-  const parts = [];
-  if (offer.details) parts.push(offer.details);
-  if (isOfferActive(offer)) parts.push("Live today");
-  else if (offer.offerStart && offer.offerEnd) {
-    parts.push(formatOfferSchedule(offer));
-  }
-  hint.textContent = parts.join(" · ");
-  hint.classList.toggle("hidden", !parts.length);
+  const text = formatOfferHintText(offer);
+  hint.textContent = text;
+  hint.classList.toggle("hidden", !text);
 }
 
 function handleOfferSelectChange() {
@@ -3431,7 +3475,8 @@ function searchAllRates(query) {
   return results.slice(0, 15);
 }
 
-function startHistoryEdit(bill) {
+async function startHistoryEdit(bill) {
+  await loadOffers(true);
   historyEditDraft = JSON.parse(JSON.stringify(bill));
   if (!historyEditDraft.homeServiceMode) {
     historyEditDraft.homeServiceMode = bill.serviceMode || "door-pickup";
@@ -3439,6 +3484,9 @@ function startHistoryEdit(bill) {
   if (historyEditDraft.shopServiceMode === undefined) {
     historyEditDraft.shopServiceMode = bill.shopServiceMode || "";
   }
+  historyEditDraft.offerId = bill.offerId || "";
+  historyEditDraft.offerPurpose = bill.offerPurpose || "";
+  historyEditDraft.offerDetails = bill.offerDetails || "";
   renderHistoryDetail(historyEditDraft);
 }
 
@@ -3466,13 +3514,18 @@ function refreshHistoryEditSummary() {
   const totalEl = els.historyDetail.querySelector(".history-detail-total");
   if (!summary) return;
 
+  const offer = getOfferFromDraft(historyEditDraft);
+  const offerHtml = offer
+    ? `<p class="history-edit-offer-line"><span>Offer</span><span>${escapeHtml(offer.purpose)}</span></p>`
+    : "";
   const discountHtml =
     historyEditDraft.discountAmount > 0
-      ? `<p><span>Discount (${historyEditDraft.discountPercent}%)</span><span>− ${formatCurrency(historyEditDraft.discountAmount)}</span></p>`
+      ? `<p><span>Discount${offer?.purpose ? ` (${offer.purpose}, ${historyEditDraft.discountPercent}%)` : ` (${historyEditDraft.discountPercent}%)`}</span><span>− ${formatCurrency(historyEditDraft.discountAmount)}</span></p>`
       : "";
 
   summary.innerHTML = `
     <p><span>Subtotal</span><span data-field="subtotal">${formatCurrency(historyEditDraft.subtotal)}</span></p>
+    ${offerHtml}
     ${discountHtml}
     <p><span>Total</span><span data-field="total">${formatCurrency(historyEditDraft.total)}</span></p>
   `;
@@ -3534,8 +3587,28 @@ function bindHistoryEditEvents() {
 
   syncHistoryEditServiceModes(draft);
 
+  els.historyDetail.querySelector("#historyEditOffer")?.addEventListener("change", (e) => {
+    const offer = offersCache.find((item) => item.id === e.target.value) || null;
+    applyOfferToDraft(draft, offer);
+    const discountInput = els.historyDetail.querySelector("#historyEditDiscount");
+    if (discountInput) discountInput.value = String(draft.discountPercent || 0);
+    updateHistoryEditOfferHint(draft);
+    refreshHistoryEditSummary();
+  });
+
   els.historyDetail.querySelector("#historyEditDiscount")?.addEventListener("input", (e) => {
-    draft.discountPercent = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
+    const newPercent = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
+    const offer = getOfferFromDraft(draft);
+    if (offer) {
+      const expected = parseOfferDiscountPercent(offer);
+      if (Math.abs(newPercent - expected) > 0.01) {
+        applyOfferToDraft(draft, null);
+        const offerSelect = els.historyDetail.querySelector("#historyEditOffer");
+        if (offerSelect) offerSelect.value = "";
+        updateHistoryEditOfferHint(draft);
+      }
+    }
+    draft.discountPercent = newPercent;
     refreshHistoryEditSummary();
   });
 
@@ -3641,6 +3714,9 @@ async function saveHistoryEdit() {
       discountPercent: historyEditDraft.discountPercent,
       discountAmount: historyEditDraft.discountAmount,
       total: historyEditDraft.total,
+      offerId: historyEditDraft.offerId || "",
+      offerPurpose: historyEditDraft.offerPurpose || "",
+      offerDetails: historyEditDraft.offerDetails || "",
       items: historyEditDraft.items,
     });
     historyEditDraft = null;
@@ -3678,10 +3754,15 @@ function renderHistoryDetailEdit(bill) {
     })
     .join("");
 
+  const offer = getOfferFromDraft(bill);
+  const offerHint = formatOfferHintText(offer);
   const discountHtml =
     bill.discountAmount > 0
-      ? `<p><span>Discount (${bill.discountPercent}%)</span><span>− ${formatCurrency(bill.discountAmount)}</span></p>`
+      ? `<p><span>Discount${offer?.purpose ? ` (${offer.purpose}, ${bill.discountPercent}%)` : ` (${bill.discountPercent}%)`}</span><span>− ${formatCurrency(bill.discountAmount)}</span></p>`
       : "";
+  const offerSummaryHtml = offer
+    ? `<p class="history-edit-offer-line"><span>Offer</span><span>${escapeHtml(offer.purpose)}</span></p>`
+    : "";
 
   els.historyDetail.innerHTML = `
     <div class="history-detail-head history-detail-head-edit">
@@ -3748,6 +3829,11 @@ function renderHistoryDetailEdit(bill) {
           <option value="post-payment" ${bill.paymentInfo === "post-payment" ? "selected" : ""}>Post Payment</option>
         </select>
       </div>
+      <div class="history-edit-field history-edit-field-full">
+        <label for="historyEditOffer">Offer</label>
+        <select id="historyEditOffer" class="offer-select">${buildOfferSelectOptions(bill.offerId || "")}</select>
+        <p id="historyEditOfferHint" class="offer-selection-hint history-edit-offer-hint${offerHint ? "" : " hidden"}">${escapeHtml(offerHint)}</p>
+      </div>
       <div class="history-edit-field">
         <label for="historyEditDiscount">Discount %</label>
         <input type="number" id="historyEditDiscount" value="${bill.discountPercent || 0}" min="0" max="100" step="1">
@@ -3774,6 +3860,7 @@ function renderHistoryDetailEdit(bill) {
     </table>
     <div class="history-detail-summary">
       <p><span>Subtotal</span><span>${formatCurrency(bill.subtotal)}</span></p>
+      ${offerSummaryHtml}
       ${discountHtml}
       <p><span>Total</span><span>${formatCurrency(bill.total)}</span></p>
     </div>
@@ -3821,8 +3908,11 @@ function renderHistoryDetail(bill) {
 
   const discountHtml =
     bill.discountAmount > 0
-      ? `<p><span>Discount (${bill.discountPercent}%)</span><span>− ${formatCurrency(bill.discountAmount)}</span></p>`
+      ? `<p><span>Discount${bill.offerPurpose ? ` (${bill.offerPurpose}, ${bill.discountPercent}%)` : ` (${bill.discountPercent}%)`}</span><span>− ${formatCurrency(bill.discountAmount)}</span></p>`
       : "";
+  const offerInfoHtml = bill.offerPurpose
+    ? `<div class="history-info-item"><span>Offer</span><strong>${escapeHtml(bill.offerPurpose)}</strong></div>`
+    : "";
 
   const status = getDeliveryStatus(bill);
   const orderReadyBtn =
@@ -3859,6 +3949,7 @@ function renderHistoryDetail(bill) {
       <div class="history-info-item"><span>Schedule</span><strong>${formatDeliveryScheduleFromBill(bill)}</strong></div>
       <div class="history-info-item"><span>Payment Type</span><strong>${getPaymentTypeLabel(bill.paymentType) || "—"}</strong></div>
       <div class="history-info-item"><span>Payment Info</span><strong>${getPaymentInfoLabel(bill.paymentInfo) || "—"}</strong></div>
+      ${offerInfoHtml}
       <div class="history-info-item"><span>Saved Via</span><strong>${getSentViaLabel(bill.sentVia)}</strong></div>
     </div>
     <table class="history-items-table">
@@ -3876,6 +3967,7 @@ function renderHistoryDetail(bill) {
     </table>
     <div class="history-detail-summary">
       <p><span>Subtotal</span><span>${formatCurrency(bill.subtotal)}</span></p>
+      ${bill.offerPurpose ? `<p class="history-edit-offer-line"><span>Offer</span><span>${escapeHtml(bill.offerPurpose)}</span></p>` : ""}
       ${discountHtml}
       <p><span>Total</span><span>${formatCurrency(bill.total)}</span></p>
     </div>

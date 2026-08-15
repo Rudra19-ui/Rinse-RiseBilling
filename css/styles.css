@@ -2457,7 +2457,8 @@ select:disabled {
   color: var(--text-muted);
 }
 
-.history-edit-field input {
+.history-edit-field input,
+.history-edit-field select {
   width: 100%;
   padding: 0.55rem 0.65rem;
   border: 1px solid rgba(26, 26, 26, 0.15);
@@ -2466,7 +2467,22 @@ select:disabled {
   background: var(--white);
 }
 
-.history-edit-field input:focus {
+.history-edit-field-full {
+  grid-column: 1 / -1;
+}
+
+.history-edit-offer-hint {
+  text-align: left;
+  margin-top: 0.25rem;
+}
+
+.history-edit-offer-line span:last-child {
+  color: var(--orange-dark, #c45a1a);
+  font-weight: 700;
+}
+
+.history-edit-field input:focus,
+.history-edit-field select:focus {
   outline: none;
   border-color: var(--orange);
   box-shadow: 0 0 0 2px rgba(242, 101, 34, 0.15);
