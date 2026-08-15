@@ -150,6 +150,11 @@ function isCommsError(err) {
   );
 }
 
+function isLidError(err) {
+  const msg = String(err?.message || err).toLowerCase();
+  return msg.includes("lid is missing") || msg.includes("no lid for user");
+}
+
 function isSessionError(err) {
   const msg = String(err?.message || err).toLowerCase();
   return (
@@ -435,38 +440,102 @@ function normalizePhone(phone) {
   return digits;
 }
 
-async function performSend(digits, message, filePath, filename) {
-  await assertSendReady();
+function serializeWid(wid) {
+  if (!wid) return null;
+  if (typeof wid === "string") return wid;
+  if (wid._serialized) return wid._serialized;
+  if (wid.user && wid.server) return `${wid.user}@${wid.server}`;
+  return null;
+}
 
-  const numberId = await client.getNumberId(digits);
-  if (!numberId) {
+async function ensureChatRegistered(chatId) {
+  if (!client?.pupPage) return false;
+  try {
+    return await client.pupPage.evaluate(async (targetChatId) => {
+      const widFactory = window.require("WAWebWidFactory");
+      const chatWid = widFactory.createWid(targetChatId);
+      const exists = await window.require("WAWebQueryExistsJob").queryWidExists(chatWid);
+      const resolvedWid = exists?.wid || chatWid;
+      const chat =
+        window.require("WAWebCollections").Chat.get(resolvedWid) ||
+        (await window.require("WAWebFindChatAction").findOrCreateLatestChat(resolvedWid))?.chat;
+      return Boolean(chat);
+    }, chatId);
+  } catch (err) {
+    console.warn("[WhatsApp] ensureChatRegistered:", err.message);
+    return false;
+  }
+}
+
+async function resolveSendTargets(digits) {
+  const phoneChatId = `${digits}@c.us`;
+  const registered = await client.getNumberId(digits);
+  if (!registered) {
     const err = new Error("This phone number is not registered on WhatsApp.");
     err.code = "NOT_ON_WHATSAPP";
     throw err;
   }
 
+  const registeredId = serializeWid(registered) || phoneChatId;
+  const targets = new Set([registeredId, phoneChatId]);
+
+  try {
+    const mappings = await client.getContactLidAndPhone([phoneChatId, registeredId]);
+    for (const entry of mappings || []) {
+      if (entry?.pn) targets.add(entry.pn);
+      if (entry?.lid) targets.add(entry.lid);
+    }
+  } catch (err) {
+    console.warn("[WhatsApp] LID lookup:", err.message);
+  }
+
+  const ordered = [...targets];
+  for (const chatId of ordered) {
+    await ensureChatRegistered(chatId);
+    try {
+      await client.getChatById(chatId);
+    } catch {
+      /* chat may still send on next step */
+    }
+  }
+
+  return ordered;
+}
+
+async function performSend(digits, message, filePath, filename) {
+  await assertSendReady();
+
+  const targets = await resolveSendTargets(digits);
   const media = MessageMedia.fromFilePath(filePath);
   media.filename = filename || path.basename(filePath);
 
   let lastErr = null;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      await assertSendReady();
-      await client.sendMessage(numberId._serialized, media, {
-        caption: message || "",
-        sendMediaAsDocument: true,
-      });
-      return;
-    } catch (err) {
-      lastErr = err;
-      if (isCommsError(err) && attempt < 3) {
-        console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/3) — retrying…`);
-        await sleep(2500 * attempt);
-        continue;
+  for (const chatId of targets) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await assertSendReady();
+        await ensureChatRegistered(chatId);
+        await client.sendMessage(chatId, media, {
+          caption: message || "",
+          sendMediaAsDocument: true,
+        });
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (isLidError(err)) {
+          console.warn(`[WhatsApp] LID error on ${chatId} — trying alternate chat id…`);
+          break;
+        }
+        if (isCommsError(err) && attempt < 3) {
+          console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/3) — retrying…`);
+          await sleep(2500 * attempt);
+          continue;
+        }
+        throw err;
       }
-      throw err;
     }
   }
+
   throw lastErr || new Error("Failed to send on WhatsApp.");
 }
 
@@ -546,6 +615,14 @@ app.post("/send", async (req, res) => {
         }
         await performSend(digits, message, filePath, filename);
         return res.json({ ok: true, recovered: true });
+      }
+
+      if (isLidError(err)) {
+        return res.status(500).json({
+          error:
+            "WhatsApp could not open a chat for this number. Click Reset Connection in WhatsApp settings, scan QR again, then retry.",
+          needsReconnect: true,
+        });
       }
 
       throw err;
