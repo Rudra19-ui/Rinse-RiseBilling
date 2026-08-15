@@ -102,9 +102,15 @@ const els = {
   expenditurePasswordError: $("#expenditurePasswordError"),
   closeExpenditurePassword: $("#closeExpenditurePassword"),
   cancelExpenditurePassword: $("#cancelExpenditurePassword"),
+  offersBtn: $("#offersBtn"),
+  offersModal: $("#offersModal"),
+  offersModalBackdrop: $("#offersModalBackdrop"),
+  offersModalBody: $("#offersModalBody"),
+  closeOffersModal: $("#closeOffersModal"),
 };
 
 const EXPENDITURE_PASSWORD = "Mandleshwar@22";
+let offersCache = [];
 
 function formatCurrency(amount) {
   return "₹" + amount.toLocaleString("en-IN");
@@ -711,12 +717,15 @@ function getItemUnit(item) {
   return isKgItem(item) ? "kg" : "pc";
 }
 
+const KG_QTY_STEP = 0.1;
+const KG_MIN_QTY = 0.1;
+
 function getMinQty(item) {
-  return isKgItem(item) ? 0.5 : 1;
+  return isKgItem(item) ? KG_MIN_QTY : 1;
 }
 
 function getQtyStep(item) {
-  return isKgItem(item) ? 0.5 : 1;
+  return isKgItem(item) ? KG_QTY_STEP : 1;
 }
 
 function normalizeQty(item, value) {
@@ -724,7 +733,7 @@ function normalizeQty(item, value) {
   let qty = parseFloat(value);
   if (isNaN(qty) || qty < min) qty = min;
   if (isKgItem(item)) {
-    qty = Math.round(qty * 2) / 2;
+    qty = Math.round(qty * 10) / 10;
   } else {
     qty = Math.round(qty);
   }
@@ -761,10 +770,12 @@ function renderQtyCellHtml(item) {
   if (isKgItem(item)) {
     const qty = Number(item.qty) || 1;
     const val = qty % 1 === 0 ? qty : qty.toFixed(1);
+    const min = getMinQty(item);
+    const step = getQtyStep(item);
     return `
       <div class="qty-control qty-control-kg">
         <button type="button" data-action="minus" data-key="${item.key}">−</button>
-        <input type="number" class="qty-input" data-key="${item.key}" value="${val}" min="0.5" step="0.5" aria-label="Kilograms">
+        <input type="number" class="qty-input" data-key="${item.key}" value="${val}" min="${min}" step="${step}" aria-label="Kilograms">
         <span class="qty-unit">kg</span>
         <button type="button" data-action="plus" data-key="${item.key}">+</button>
       </div>
@@ -1585,6 +1596,110 @@ function formatDeliveryDateOnly(dateVal) {
     month: "short",
     year: "numeric",
   });
+}
+
+function parseDateOnly(dateVal) {
+  if (!dateVal) return null;
+  const [year, month, day] = dateVal.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isOfferActive(offer) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = parseDateOnly(offer.offerStart);
+  const end = parseDateOnly(offer.offerEnd);
+  if (!start || !end) return false;
+  return today >= start && today <= end;
+}
+
+function formatOfferSchedule(offer) {
+  if (!offer.offerStart && !offer.offerEnd) return "—";
+  if (offer.offerStart === offer.offerEnd) {
+    return formatDeliveryDateOnly(offer.offerStart);
+  }
+  return `${formatDeliveryDateOnly(offer.offerStart)} – ${formatDeliveryDateOnly(offer.offerEnd)}`;
+}
+
+async function loadOffers() {
+  if (offersCache.length) return offersCache;
+  try {
+    const res = await fetch("data/offers.json");
+    const data = await res.json();
+    offersCache = (data.offers || []).slice().sort((a, b) => {
+      const ad = parseDateOnly(a.eventDate)?.getTime() ?? 0;
+      const bd = parseDateOnly(b.eventDate)?.getTime() ?? 0;
+      return ad - bd;
+    });
+  } catch {
+    offersCache = [];
+  }
+  return offersCache;
+}
+
+function renderOffersModalBody() {
+  const body = els.offersModalBody;
+  if (!body) return;
+
+  if (!offersCache.length) {
+    body.innerHTML =
+      '<p class="offers-empty">No offers listed yet. Add entries in <code>data/offers.json</code>.</p>';
+    return;
+  }
+
+  const activeCount = offersCache.filter(isOfferActive).length;
+
+  body.innerHTML = `
+    ${activeCount ? `<p class="offers-active-note">${activeCount} offer${activeCount === 1 ? "" : "s"} live today</p>` : ""}
+    <div class="offers-list">
+      ${offersCache
+        .map(
+          (offer) => `
+        <article class="offer-card${isOfferActive(offer) ? " offer-card-active" : ""}">
+          <div class="offer-card-head">
+            <h4 class="offer-purpose">${escapeHtml(offer.purpose)}</h4>
+            ${isOfferActive(offer) ? '<span class="offer-badge">Live now</span>' : ""}
+          </div>
+          <dl class="offer-meta">
+            <div class="offer-meta-row">
+              <dt>Event date</dt>
+              <dd>${escapeHtml(formatDeliveryDateOnly(offer.eventDate))}</dd>
+            </div>
+            <div class="offer-meta-row">
+              <dt>Offer schedule</dt>
+              <dd>${escapeHtml(formatOfferSchedule(offer))}</dd>
+            </div>
+            ${
+              offer.details
+                ? `<div class="offer-meta-row offer-details-row"><dt>Offer</dt><dd>${escapeHtml(offer.details)}</dd></div>`
+                : ""
+            }
+          </dl>
+        </article>`
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+async function openOffersModal() {
+  if (!els.offersModal) return;
+  els.offersModal.classList.remove("hidden");
+  els.offersModal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+  if (els.offersModalBody) {
+    els.offersModalBody.innerHTML = '<p class="offers-loading">Loading offers…</p>';
+  }
+  await loadOffers();
+  renderOffersModalBody();
+}
+
+function closeOffersModal() {
+  if (!els.offersModal) return;
+  els.offersModal.classList.add("hidden");
+  els.offersModal.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
 }
 
 function formatDeliveryScheduleFromBill(bill) {
@@ -3842,6 +3957,9 @@ async function init() {
   els.whatsappStatusPill?.addEventListener("click", () => openWhatsAppConnectModal());
   els.closeWhatsAppConnect?.addEventListener("click", closeWhatsAppConnectModal);
   els.whatsappConnectBackdrop?.addEventListener("click", closeWhatsAppConnectModal);
+  els.offersBtn?.addEventListener("click", openOffersModal);
+  els.closeOffersModal?.addEventListener("click", closeOffersModal);
+  els.offersModalBackdrop?.addEventListener("click", closeOffersModal);
   refreshWhatsAppStatus();
   if (isHostedDeployment()) {
     API.getWhatsAppStatus(true).catch(() => {});
@@ -3886,6 +4004,7 @@ async function init() {
       if (!els.overallStatsModal.classList.contains("hidden")) hideOverallStatsReport();
       if (!els.whatsappConnectModal?.classList.contains("hidden")) closeWhatsAppConnectModal();
       if (!els.expenditurePasswordModal?.classList.contains("hidden")) closeExpenditurePasswordModal();
+      if (!els.offersModal?.classList.contains("hidden")) closeOffersModal();
     }
   });
 }
