@@ -369,7 +369,7 @@ def api_get_offers():
 def api_save_offers():
     data = request.get_json(force=True, silent=True) or {}
     password = (data.get("password") or request.headers.get("X-Offers-Password") or "").strip()
-    expected = os.environ.get("OFFERS_EDIT_PASSWORD", os.environ.get("CLEAR_DATA_PASSWORD", "Mandleshwar@22")).strip()
+    expected = os.environ.get("OFFERS_EDIT_PASSWORD", os.environ.get("CLEAR_DATA_PASSWORD", "NihkilDada@22")).strip()
     if not password or password != expected:
         return jsonify({"error": "Invalid password"}), 403
     raw_offers = data.get("offers")
@@ -386,7 +386,7 @@ def api_save_offers():
 def api_clear_all_data():
     data = request.get_json(force=True, silent=True) or {}
     password = (data.get("password") or request.headers.get("X-Clear-Data-Password") or "").strip()
-    expected = os.environ.get("CLEAR_DATA_PASSWORD", "Mandleshwar@22").strip()
+    expected = os.environ.get("CLEAR_DATA_PASSWORD", "NihkilDada@22").strip()
     if not password or password != expected:
         return jsonify({"error": "Invalid password"}), 403
     result = clear_all_data()

@@ -113,7 +113,7 @@ const els = {
   offersDoneManageBtn: $("#offersDoneManageBtn"),
 };
 
-const EXPENDITURE_PASSWORD = "Mandleshwar@22";
+const EXPENDITURE_PASSWORD = "NihkilDada@22";
 let offersCache = [];
 let offersEditUnlocked = false;
 let offersEditingId = null;
