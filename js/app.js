@@ -129,6 +129,87 @@ function escapeAttr(value) {
     .replace(/</g, "&lt;");
 }
 
+function hideAppLoader() {
+  const loader = document.getElementById("appLoader");
+  if (loader) {
+    loader.classList.add("hidden");
+    loader.setAttribute("aria-busy", "false");
+  }
+}
+
+function ensureSectionLoader(root) {
+  if (!root) return null;
+  root.classList.add("section-loading-root");
+  let overlay = root.querySelector(":scope > .section-loader");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "section-loader hidden";
+    overlay.innerHTML =
+      '<div class="section-loader-card"><div class="loader-spinner" aria-hidden="true"></div><p class="section-loader-text">Loading…</p></div>';
+    root.prepend(overlay);
+  }
+  return overlay;
+}
+
+function setSectionLoading(root, loading, message = "Loading…") {
+  const overlay = ensureSectionLoader(root);
+  if (!overlay) return;
+  const text = overlay.querySelector(".section-loader-text");
+  if (text && message) text.textContent = message;
+  overlay.classList.toggle("hidden", !loading);
+  root.classList.toggle("is-section-loading", !!loading);
+}
+
+function setButtonLoading(btn, loading, label = "Please wait…") {
+  if (!btn) return;
+  if (loading) {
+    if (btn.classList.contains("is-loading")) return;
+    btn.dataset.originalHtml = btn.innerHTML;
+    btn.dataset.wasDisabled = btn.disabled ? "1" : "0";
+    btn.disabled = true;
+    btn.classList.add("is-loading");
+    btn.setAttribute("aria-busy", "true");
+    const compact =
+      btn.classList.contains("btn-info") ||
+      btn.classList.contains("btn-favorite") ||
+      btn.classList.contains("btn-remove");
+    const spinnerClass = compact ? "loader-spinner loader-spinner-xs" : "loader-spinner loader-spinner-sm";
+    btn.innerHTML = compact
+      ? `<span class="${spinnerClass}" aria-hidden="true"></span>`
+      : `<span class="${spinnerClass}" aria-hidden="true"></span><span>${escapeHtml(label)}</span>`;
+  } else {
+    btn.classList.remove("is-loading");
+    btn.removeAttribute("aria-busy");
+    if (btn.dataset.originalHtml != null) {
+      btn.innerHTML = btn.dataset.originalHtml;
+      delete btn.dataset.originalHtml;
+    }
+    if (btn.dataset.wasDisabled === "1") btn.disabled = true;
+    else btn.disabled = false;
+    delete btn.dataset.wasDisabled;
+  }
+}
+
+async function withButtonLoading(btn, work, label = "Please wait…") {
+  if (!btn) return work();
+  if (btn.classList.contains("is-loading")) return;
+  setButtonLoading(btn, true, label);
+  try {
+    return await work();
+  } finally {
+    setButtonLoading(btn, false);
+    if (
+      btn === els.saveBillBtn ||
+      btn === els.whatsappBtn ||
+      btn === els.printBtn ||
+      btn === els.customerFavoriteBtn ||
+      btn === els.customerInfoBtn
+    ) {
+      updateActionButtons();
+    }
+  }
+}
+
 const IST_TIMEZONE = "Asia/Kolkata";
 
 const GOOGLE_REVIEW_URL =
@@ -1067,9 +1148,15 @@ function getCustomerOrders(phone) {
   );
 }
 
-async function refreshBillHistory() {
-  billHistoryCache = await API.getBills();
-  return billHistoryCache;
+async function refreshBillHistory({ silent = false } = {}) {
+  const showOverlay = !silent && els.historyView && !els.historyView.classList.contains("hidden");
+  if (showOverlay) setSectionLoading(els.historyView, true, "Loading bills…");
+  try {
+    billHistoryCache = await API.getBills();
+    return billHistoryCache;
+  } finally {
+    if (showOverlay) setSectionLoading(els.historyView, false);
+  }
 }
 
 function getBillHistory() {
@@ -1157,18 +1244,20 @@ async function toggleCustomerFavorite() {
     return;
   }
   const nextFavorite = !els.customerFavoriteBtn?.classList.contains("active");
-  try {
-    await API.setCustomerFavorite(
-      key,
-      nextFavorite,
-      phone,
-      els.customerName.value.trim()
-    );
-    updateFavoriteUi(nextFavorite, true);
-    loadCustomerProfileByPhone();
-  } catch (err) {
-    alert("Could not update regular customer: " + err.message);
-  }
+  await withButtonLoading(els.customerFavoriteBtn, async () => {
+    try {
+      await API.setCustomerFavorite(
+        key,
+        nextFavorite,
+        phone,
+        els.customerName.value.trim()
+      );
+      updateFavoriteUi(nextFavorite, true);
+      loadCustomerProfileByPhone();
+    } catch (err) {
+      alert("Could not update regular customer: " + err.message);
+    }
+  }, nextFavorite ? "Saving…" : "Updating…");
 }
 
 function updateProfileHint(profile, isNew = false, isFavorite = false) {
@@ -1532,7 +1621,7 @@ function renderCustomerStats(stats, chartData) {
   `;
 }
 
-function showCustomerStats(phoneOverride, nameOverride) {
+function showCustomerStats(phoneOverride, nameOverride, triggerBtn) {
   const phone = (
     typeof phoneOverride === "string" ? phoneOverride : els.customerPhone.value
   ).trim();
@@ -1546,52 +1635,71 @@ function showCustomerStats(phoneOverride, nameOverride) {
     return;
   }
 
-  fetchCustomerProfile(phone).then(async ({ profile, orders }) => {
-    const key = normalizePhoneKey(phone);
-    let isFavorite = profile?.isFavorite || false;
+  const overlayRoot = phoneOverride
+    ? els.historyView
+    : els.billingView;
+
+  const run = async () => {
+    setSectionLoading(overlayRoot, true, "Loading profile…");
     try {
-      const fav = await API.getCustomerFavorite(key);
-      isFavorite = !!fav.isFavorite;
-    } catch {
-      /* ignore */
+      const { profile, orders } = await fetchCustomerProfile(phone);
+      const key = normalizePhoneKey(phone);
+      let isFavorite = profile?.isFavorite || false;
+      try {
+        const fav = await API.getCustomerFavorite(key);
+        isFavorite = !!fav.isFavorite;
+      } catch {
+        /* ignore */
+      }
+
+      const chartData = computeChartData(orders);
+      let stats = profileToStats(profile, orders.slice(0, 8));
+
+      if (!stats && orders.length > 0) {
+        const computed = computeCustomerStats(orders);
+        stats = {
+          ...computed,
+          phoneKey: key,
+          profileCreatedAt: computed.firstOrder,
+        };
+      }
+      if (stats) stats.isFavorite = isFavorite;
+
+      const displayName = displayNameInput || profile?.name || stats?.name || "New Customer";
+
+      document.getElementById("customerStatsTitle").textContent = displayName;
+
+      if (profile) {
+        els.customerStatsPhone.textContent = profile.phone;
+        const memberSince = new Date(profile.profileCreatedAt).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        });
+        els.customerStatsMember.textContent = `Customer since ${memberSince}`;
+        els.customerStatsMember.classList.remove("hidden");
+      } else {
+        els.customerStatsPhone.textContent = phone;
+        els.customerStatsMember.textContent = "New customer — no profile yet";
+        els.customerStatsMember.classList.remove("hidden");
+      }
+
+      renderCustomerStats(stats, chartData);
+      els.customerStatsModal.classList.remove("hidden");
+      document.body.style.overflow = "hidden";
+    } catch (err) {
+      alert("Could not load customer profile: " + (err.message || err));
+    } finally {
+      setSectionLoading(overlayRoot, false);
     }
+  };
 
-    const chartData = computeChartData(orders);
-    let stats = profileToStats(profile, orders.slice(0, 8));
-
-    if (!stats && orders.length > 0) {
-      const computed = computeCustomerStats(orders);
-      stats = {
-        ...computed,
-        phoneKey: key,
-        profileCreatedAt: computed.firstOrder,
-      };
-    }
-    if (stats) stats.isFavorite = isFavorite;
-
-    const displayName = displayNameInput || profile?.name || stats?.name || "New Customer";
-
-    document.getElementById("customerStatsTitle").textContent = displayName;
-
-    if (profile) {
-      els.customerStatsPhone.textContent = profile.phone;
-      const memberSince = new Date(profile.profileCreatedAt).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-      });
-      els.customerStatsMember.textContent = `Customer since ${memberSince}`;
-      els.customerStatsMember.classList.remove("hidden");
-    } else {
-      els.customerStatsPhone.textContent = phone;
-      els.customerStatsMember.textContent = "New customer — no profile yet";
-      els.customerStatsMember.classList.remove("hidden");
-    }
-
-    renderCustomerStats(stats, chartData);
-    els.customerStatsModal.classList.remove("hidden");
-    document.body.style.overflow = "hidden";
-  });
+  const btn = triggerBtn || (phoneOverride ? null : els.customerInfoBtn);
+  if (btn) {
+    withButtonLoading(btn, run, "Loading…");
+  } else {
+    run();
+  }
 }
 
 function hideCustomerStats() {
@@ -1906,11 +2014,14 @@ function bindOffersPasswordGate() {
       input?.select();
       return;
     }
-    offersEditUnlocked = true;
-    offersEditingId = null;
-    error?.classList.add("hidden");
-    updateOffersManageControls();
-    renderOffersModalBody();
+    const unlockBtn = form.querySelector("button[type=submit]");
+    withButtonLoading(unlockBtn, async () => {
+      offersEditUnlocked = true;
+      offersEditingId = null;
+      error?.classList.add("hidden");
+      updateOffersManageControls();
+      renderOffersModalBody();
+    }, "Opening…");
   });
   requestAnimationFrame(() => input?.focus());
 }
@@ -1927,8 +2038,9 @@ function bindOfferForm(form, { onSubmit, onCancel }) {
       alert("Please fill in all dates.");
       return;
     }
+    const submitBtn = form.querySelector("button[type=submit]");
     try {
-      await onSubmit(offer);
+      await withButtonLoading(submitBtn, () => onSubmit(offer), "Saving…");
     } catch (err) {
       alert("Could not save offer: " + err.message);
     }
@@ -1981,9 +2093,11 @@ function bindOffersModalActions() {
         if (!offer) return;
         if (!confirm(`Remove "${offer.purpose}" from the offer list?`)) return;
         try {
-          await persistOffers(offersCache.filter((item) => item.id !== id));
-          if (offersEditingId === id) offersEditingId = null;
-          renderOffersModalBody();
+          await withButtonLoading(btn, async () => {
+            await persistOffers(offersCache.filter((item) => item.id !== id));
+            if (offersEditingId === id) offersEditingId = null;
+            renderOffersModalBody();
+          }, "Removing…");
         } catch (err) {
           alert("Could not remove offer: " + err.message);
         }
@@ -2101,14 +2215,16 @@ function exitOffersManageMode() {
 
 async function openOffersModal() {
   if (!els.offersModal) return;
-  els.offersModal.classList.remove("hidden");
-  els.offersModal.setAttribute("aria-hidden", "false");
-  document.body.style.overflow = "hidden";
-  if (els.offersModalBody) {
-    els.offersModalBody.innerHTML = '<p class="offers-loading">Loading offers…</p>';
-  }
-  await loadOffers(true);
-  renderOffersModalBody();
+  await withButtonLoading(els.offersBtn, async () => {
+    els.offersModal.classList.remove("hidden");
+    els.offersModal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    if (els.offersModalBody) {
+      els.offersModalBody.innerHTML = '<p class="offers-loading">Loading offers…</p>';
+    }
+    await loadOffers(true);
+    renderOffersModalBody();
+  }, "Loading…");
 }
 
 function closeOffersModal() {
@@ -2525,19 +2641,17 @@ async function bindWhatsAppStartButton(hosted = isHostedDeployment()) {
   btn.dataset.bound = "1";
   const retryLabel = hosted ? "Retry Scanner" : "Start WhatsApp Scanner";
   btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.textContent = hosted ? "Starting scanner…" : "Starting…";
     try {
-      await API.startWhatsAppBridge();
-      renderWhatsAppConnectLoading();
-      setTimeout(() => pollWhatsAppConnectModal(true), 1500);
+      await withButtonLoading(btn, async () => {
+        await API.startWhatsAppBridge();
+        renderWhatsAppConnectLoading();
+        setTimeout(() => pollWhatsAppConnectModal(true), 1500);
+      }, hosted ? "Starting scanner…" : "Starting…");
     } catch (err) {
       const hint = hosted
         ? "Scanner is still starting on the server — wait 1–2 minutes and try again."
         : err.message || "Restart Start Billing.bat";
       showWhatsAppToast(`<strong>Could not start scanner</strong>${escapeHtml(hint)}`);
-    } finally {
-      btn.disabled = false;
       btn.textContent = retryLabel;
     }
   });
@@ -2545,22 +2659,15 @@ async function bindWhatsAppStartButton(hosted = isHostedDeployment()) {
 
 async function resetWhatsAppConnection() {
   const btn = $("#whatsappResetBtn");
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Resetting…";
-  }
   lastRenderedWhatsAppQr = null;
   try {
-    await API.resetWhatsAppSession();
-    showWhatsAppToast("<strong>Connection reset</strong>Wait for a fresh QR code, then scan again.");
-    pollWhatsAppConnectModal();
+    await withButtonLoading(btn, async () => {
+      await API.resetWhatsAppSession();
+      showWhatsAppToast("<strong>Connection reset</strong>Wait for a fresh QR code, then scan again.");
+      pollWhatsAppConnectModal();
+    }, "Resetting…");
   } catch (err) {
     showWhatsAppToast(`<strong>Reset failed</strong>${escapeHtml(err.message || "Try restarting Start Billing.bat")}`);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Reset Connection";
-    }
   }
 }
 
@@ -2697,17 +2804,31 @@ function showHistoryView() {
   historyEditDraft = null;
   historyPeriodFilter = "today";
   historyCustomDate = "";
-  refreshBillHistory().then(() => {
-    syncHistoryPeriodUi();
-    renderHistoryList();
-    renderHistoryDetail(null);
-  });
+  withButtonLoading(els.historyBtn, async () => {
+    setSectionLoading(els.historyView, true, "Loading bills…");
+    try {
+      await refreshBillHistory({ silent: true });
+      syncHistoryPeriodUi();
+      renderHistoryList();
+      renderHistoryDetail(null);
+    } catch (err) {
+      alert("Could not load history: " + (err.message || err));
+    } finally {
+      setSectionLoading(els.historyView, false);
+    }
+  }, "Loading…");
 }
 
-async function refreshExpenditures() {
-  const { from, to } = getExpenditureDateRange();
-  expenditureCache = await API.getExpenditures(from, to);
-  renderExpenditureList();
+async function refreshExpenditures({ silent = false } = {}) {
+  const showOverlay = !silent && els.expenditureView && !els.expenditureView.classList.contains("hidden");
+  if (showOverlay) setSectionLoading(els.expenditureView, true, "Loading expenditure…");
+  try {
+    const { from, to } = getExpenditureDateRange();
+    expenditureCache = await API.getExpenditures(from, to);
+    renderExpenditureList();
+  } finally {
+    if (showOverlay) setSectionLoading(els.expenditureView, false);
+  }
 }
 
 function renderExpenditureList() {
@@ -2740,7 +2861,7 @@ function renderExpenditureList() {
     .join("");
 
   els.expenditureList.querySelectorAll(".expenditure-delete").forEach((btn) => {
-    btn.addEventListener("click", () => deleteExpenditureEntry(Number(btn.dataset.id)));
+    btn.addEventListener("click", () => deleteExpenditureEntry(Number(btn.dataset.id), btn));
   });
 }
 
@@ -2757,11 +2878,13 @@ async function addExpenditureEntry(name, amount, date) {
   await refreshExpenditures();
 }
 
-async function deleteExpenditureEntry(id) {
+async function deleteExpenditureEntry(id, btn) {
   if (!confirm("Remove this expenditure entry?")) return;
   try {
-    await API.deleteExpenditure(id);
-    await refreshExpenditures();
+    await withButtonLoading(btn, async () => {
+      await API.deleteExpenditure(id);
+      await refreshExpenditures();
+    }, "Removing…");
   } catch (err) {
     alert("Could not remove entry: " + err.message);
   }
@@ -2791,11 +2914,15 @@ function handleExpenditurePasswordSubmit(e) {
     els.expenditurePasswordInput?.select();
     return;
   }
-  closeExpenditurePasswordModal();
-  showExpenditureView();
+  const openBtn = els.expenditurePasswordForm?.querySelector("button[type=submit]");
+  withButtonLoading(openBtn, async () => {
+    closeExpenditurePasswordModal();
+    await showExpenditureView();
+  }, "Opening…");
 }
 
 function requestExpenditureAccess() {
+  if (els.expenditureView && !els.expenditureView.classList.contains("hidden")) return;
   openExpenditurePasswordModal();
 }
 
@@ -2803,7 +2930,7 @@ function showExpenditureView() {
   hideSecondaryViews();
   els.expenditureView.classList.remove("hidden");
   setDefaultExpenditureDates();
-  refreshExpenditures();
+  return refreshExpenditures();
 }
 
 function handleExpenditureDateFilterChange() {
@@ -2837,14 +2964,14 @@ function handleExpenditureSubmit(e) {
     return;
   }
 
-  addExpenditureEntry(name, amount, date)
-    .then(() => {
-      els.expenditureForm.reset();
-      setDefaultExpenditureDates();
-      els.expenditureName.focus();
-      renderExpenditureList();
-    })
-    .catch((err) => alert("Could not save expenditure: " + err.message));
+  const submitBtn = els.expenditureForm?.querySelector("button[type=submit]");
+  withButtonLoading(submitBtn, async () => {
+    await addExpenditureEntry(name, amount, date);
+    els.expenditureForm.reset();
+    setDefaultExpenditureDates();
+    els.expenditureName.focus();
+    renderExpenditureList();
+  }, "Saving…").catch((err) => alert("Could not save expenditure: " + err.message));
 }
 
 function computeProfitLossLocal() {
@@ -3064,17 +3191,24 @@ async function showProfitLossReport() {
   }
 
   try {
-    let data;
-    try {
-      data = await API.getProfitLoss(from, to);
-    } catch {
-      await refreshBillHistory();
-      await refreshExpenditures();
-      data = computeProfitLossLocal();
-    }
-    renderProfitLossReport(data);
-    els.profitLossModal.classList.remove("hidden");
-    document.body.style.overflow = "hidden";
+    await withButtonLoading(els.calculateProfitBtn, async () => {
+      setSectionLoading(els.expenditureView, true, "Calculating…");
+      try {
+        let data;
+        try {
+          data = await API.getProfitLoss(from, to);
+        } catch {
+          await refreshBillHistory({ silent: true });
+          await refreshExpenditures({ silent: true });
+          data = computeProfitLossLocal();
+        }
+        renderProfitLossReport(data);
+        els.profitLossModal.classList.remove("hidden");
+        document.body.style.overflow = "hidden";
+      } finally {
+        setSectionLoading(els.expenditureView, false);
+      }
+    }, "Calculating…");
   } catch (err) {
     alert("Could not calculate profit & loss: " + err.message);
   }
@@ -3242,16 +3376,23 @@ function renderOverallStatsReport(data) {
 
 async function showOverallStatsReport() {
   try {
-    let data;
-    try {
-      data = await API.getOverallStats();
-    } catch {
-      await refreshBillHistory();
-      data = computeOverallStatsLocal();
-    }
-    renderOverallStatsReport(data);
-    els.overallStatsModal.classList.remove("hidden");
-    document.body.style.overflow = "hidden";
+    await withButtonLoading(els.overallStatsBtn, async () => {
+      setSectionLoading(els.historyView, true, "Loading statistics…");
+      try {
+        let data;
+        try {
+          data = await API.getOverallStats();
+        } catch {
+          await refreshBillHistory({ silent: true });
+          data = computeOverallStatsLocal();
+        }
+        renderOverallStatsReport(data);
+        els.overallStatsModal.classList.remove("hidden");
+        document.body.style.overflow = "hidden";
+      } finally {
+        setSectionLoading(els.historyView, false);
+      }
+    }, "Loading…");
   } catch (err) {
     alert("Could not load overall statistics: " + err.message);
   }
@@ -3267,12 +3408,23 @@ function hideProfitLossReport() {
   document.body.style.overflow = "";
 }
 
-async function updateBillDeliveryStatus(billId, status) {
-  const bill = await API.updateBillStatus(billId, status);
-  await refreshBillHistory();
-  selectedHistoryId = bill.id;
-  renderHistoryList();
-  renderHistoryDetail(bill);
+async function updateBillDeliveryStatus(billId, status, btn) {
+  try {
+    await withButtonLoading(btn, async () => {
+      setSectionLoading(els.historyView, true, "Updating status…");
+      try {
+        const bill = await API.updateBillStatus(billId, status);
+        await refreshBillHistory({ silent: true });
+        selectedHistoryId = bill.id;
+        renderHistoryList();
+        renderHistoryDetail(bill);
+      } finally {
+        setSectionLoading(els.historyView, false);
+      }
+    }, "Updating…");
+  } catch (err) {
+    alert("Could not update status: " + (err.message || err));
+  }
 }
 
 function getHistoryFilterLabel(filter) {
@@ -3377,11 +3529,13 @@ function getBillsForHistoryExport() {
 function downloadHistoryExcel() {
   const range = getHistoryDateRange();
   const bills = getBillsForHistoryExport();
-  if (typeof exportHistoryToExcel === "function") {
-    exportHistoryToExcel(bills, range);
-  } else {
-    alert("Excel export is not available. Please refresh the page and try again.");
-  }
+  withButtonLoading(els.downloadHistoryExcelBtn, async () => {
+    if (typeof exportHistoryToExcel === "function") {
+      exportHistoryToExcel(bills, range);
+    } else {
+      alert("Excel export is not available. Please refresh the page and try again.");
+    }
+  }, "Preparing…");
 }
 
 function renderHistoryList() {
@@ -3494,19 +3648,26 @@ function searchAllRates(query) {
   return results.slice(0, 15);
 }
 
-async function startHistoryEdit(bill) {
-  await loadOffers(true);
-  historyEditDraft = JSON.parse(JSON.stringify(bill));
-  if (!historyEditDraft.homeServiceMode) {
-    historyEditDraft.homeServiceMode = bill.serviceMode || "door-pickup";
-  }
-  if (historyEditDraft.shopServiceMode === undefined) {
-    historyEditDraft.shopServiceMode = bill.shopServiceMode || "";
-  }
-  historyEditDraft.offerId = bill.offerId || "";
-  historyEditDraft.offerPurpose = bill.offerPurpose || "";
-  historyEditDraft.offerDetails = bill.offerDetails || "";
-  renderHistoryDetail(historyEditDraft);
+async function startHistoryEdit(bill, btn) {
+  await withButtonLoading(btn, async () => {
+    setSectionLoading(els.historyView, true, "Opening editor…");
+    try {
+      await loadOffers(true);
+      historyEditDraft = JSON.parse(JSON.stringify(bill));
+      if (!historyEditDraft.homeServiceMode) {
+        historyEditDraft.homeServiceMode = bill.serviceMode || "door-pickup";
+      }
+      if (historyEditDraft.shopServiceMode === undefined) {
+        historyEditDraft.shopServiceMode = bill.shopServiceMode || "";
+      }
+      historyEditDraft.offerId = bill.offerId || "";
+      historyEditDraft.offerPurpose = bill.offerPurpose || "";
+      historyEditDraft.offerDetails = bill.offerDetails || "";
+      renderHistoryDetail(historyEditDraft);
+    } finally {
+      setSectionLoading(els.historyView, false);
+    }
+  }, "Loading…");
 }
 
 function cancelHistoryEdit() {
@@ -3704,11 +3865,13 @@ function bindHistoryEditEvents() {
     });
   });
 
-  els.historyDetail.querySelector("[data-action=save-edit]")?.addEventListener("click", saveHistoryEdit);
+  els.historyDetail.querySelector("[data-action=save-edit]")?.addEventListener("click", (e) =>
+    saveHistoryEdit(e.currentTarget)
+  );
   els.historyDetail.querySelector("[data-action=cancel-edit]")?.addEventListener("click", cancelHistoryEdit);
 }
 
-async function saveHistoryEdit() {
+async function saveHistoryEdit(btn) {
   if (!historyEditDraft) return;
   if (historyEditDraft.items.length === 0) {
     alert("Add at least one item to the bill.");
@@ -3718,31 +3881,40 @@ async function saveHistoryEdit() {
   recalcHistoryEditDraft();
   historyEditDraft.deliveryDisplay = syncDeliveryDisplayFromDate(historyEditDraft.deliveryDate);
 
+  const payload = {
+    customerName: historyEditDraft.customerName,
+    customerPhone: historyEditDraft.customerPhone,
+    deliveryDate: historyEditDraft.deliveryDate,
+    deliveryTime: historyEditDraft.deliveryTime || "",
+    deliveryDisplay: historyEditDraft.deliveryDisplay,
+    homeServiceMode: historyEditDraft.homeServiceMode,
+    shopServiceMode: historyEditDraft.shopServiceMode,
+    paymentType: historyEditDraft.paymentType || "",
+    paymentInfo: historyEditDraft.paymentInfo || "",
+    subtotal: historyEditDraft.subtotal,
+    discountPercent: historyEditDraft.discountPercent,
+    discountAmount: historyEditDraft.discountAmount,
+    total: historyEditDraft.total,
+    offerId: historyEditDraft.offerId || "",
+    offerPurpose: historyEditDraft.offerPurpose || "",
+    offerDetails: historyEditDraft.offerDetails || "",
+    items: historyEditDraft.items,
+  };
+
   try {
-    const updated = await API.updateBill(historyEditDraft.id, {
-      customerName: historyEditDraft.customerName,
-      customerPhone: historyEditDraft.customerPhone,
-      deliveryDate: historyEditDraft.deliveryDate,
-      deliveryTime: historyEditDraft.deliveryTime || "",
-      deliveryDisplay: historyEditDraft.deliveryDisplay,
-      homeServiceMode: historyEditDraft.homeServiceMode,
-      shopServiceMode: historyEditDraft.shopServiceMode,
-      paymentType: historyEditDraft.paymentType || "",
-      paymentInfo: historyEditDraft.paymentInfo || "",
-      subtotal: historyEditDraft.subtotal,
-      discountPercent: historyEditDraft.discountPercent,
-      discountAmount: historyEditDraft.discountAmount,
-      total: historyEditDraft.total,
-      offerId: historyEditDraft.offerId || "",
-      offerPurpose: historyEditDraft.offerPurpose || "",
-      offerDetails: historyEditDraft.offerDetails || "",
-      items: historyEditDraft.items,
-    });
-    historyEditDraft = null;
-    await refreshBillHistory();
-    selectedHistoryId = updated.id;
-    renderHistoryList();
-    renderHistoryDetail(updated);
+    await withButtonLoading(btn, async () => {
+      setSectionLoading(els.historyView, true, "Saving changes…");
+      try {
+        const updated = await API.updateBill(historyEditDraft.id, payload);
+        historyEditDraft = null;
+        await refreshBillHistory({ silent: true });
+        selectedHistoryId = updated.id;
+        renderHistoryList();
+        renderHistoryDetail(updated);
+      } finally {
+        setSectionLoading(els.historyView, false);
+      }
+    }, "Saving…");
   } catch (err) {
     alert("Could not save changes: " + err.message);
   }
@@ -3999,28 +4171,28 @@ function renderHistoryDetail(bill) {
     </div>
   `;
 
-  els.historyDetail.querySelector("[data-action=edit]")?.addEventListener("click", () =>
-    startHistoryEdit(bill)
+  els.historyDetail.querySelector("[data-action=edit]")?.addEventListener("click", (e) =>
+    startHistoryEdit(bill, e.currentTarget)
   );
-  els.historyDetail.querySelector("[data-action=mark-ready]")?.addEventListener("click", () =>
-    updateBillDeliveryStatus(bill.id, "ready")
+  els.historyDetail.querySelector("[data-action=mark-ready]")?.addEventListener("click", (e) =>
+    updateBillDeliveryStatus(bill.id, "ready", e.currentTarget)
   );
-  els.historyDetail.querySelector("[data-action=mark-done]")?.addEventListener("click", () =>
-    updateBillDeliveryStatus(bill.id, "done")
+  els.historyDetail.querySelector("[data-action=mark-done]")?.addEventListener("click", (e) =>
+    updateBillDeliveryStatus(bill.id, "done", e.currentTarget)
   );
-  els.historyDetail.querySelector("[data-action=mark-pending]")?.addEventListener("click", () =>
-    updateBillDeliveryStatus(bill.id, "pending")
+  els.historyDetail.querySelector("[data-action=mark-pending]")?.addEventListener("click", (e) =>
+    updateBillDeliveryStatus(bill.id, "pending", e.currentTarget)
   );
   els.historyDetail.querySelector("[data-action=profile]")?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    showCustomerStats(bill.customerPhone, bill.customerName);
+    showCustomerStats(bill.customerPhone, bill.customerName, e.currentTarget);
   });
-  els.historyDetail.querySelector("[data-action=reprint]")?.addEventListener("click", () =>
-    printHistoryBill(bill)
+  els.historyDetail.querySelector("[data-action=reprint]")?.addEventListener("click", (e) =>
+    printHistoryBill(bill, e.currentTarget)
   );
-  els.historyDetail.querySelector("[data-action=resend]")?.addEventListener("click", () =>
-    sendHistoryWhatsApp(bill)
+  els.historyDetail.querySelector("[data-action=resend]")?.addEventListener("click", (e) =>
+    sendHistoryWhatsApp(bill, e.currentTarget)
   );
 }
 
@@ -4088,36 +4260,54 @@ function buildMessageFromRecord(bill) {
   return message;
 }
 
-function printHistoryBill(bill) {
-  buildReceiptFromRecord(bill);
-  window.print();
+function printHistoryBill(bill, btn) {
+  withButtonLoading(btn, async () => {
+    buildReceiptFromRecord(bill);
+  }, "Printing…").then(() => window.print());
 }
 
-function sendHistoryWhatsApp(bill) {
+async function sendHistoryWhatsApp(bill, btn) {
   const phone = formatPhoneForWhatsApp(bill.customerPhone);
   if (phone.length < 12) {
     alert("This bill has no valid phone number.");
     return;
   }
-  shareBillOnWhatsApp(phone, bill).catch(async (err) => {
+  try {
+    await withButtonLoading(btn, async () => {
+      setSectionLoading(els.historyView, true, "Sending on WhatsApp…");
+      try {
+        await shareBillOnWhatsApp(phone, bill);
+      } finally {
+        setSectionLoading(els.historyView, false);
+      }
+    }, "Sending…");
+  } catch (err) {
     alert("Could not send PDF on WhatsApp: " + err.message);
     try {
       await downloadBillInvoicePdf(bill);
     } catch {
       /* ignore */
     }
-  });
+  }
 }
 
 function updateActionButtons() {
   const hasItems = billItems.length > 0;
   const validCustomer = isCustomerValid();
   const hasPhone = normalizePhoneKey(els.customerPhone.value).length >= 10;
-  els.printBtn.disabled = !hasItems || !validCustomer;
-  els.saveBillBtn.disabled = !hasItems || !validCustomer;
-  els.whatsappBtn.disabled = !hasItems || !validCustomer;
-  els.customerInfoBtn.disabled = !hasPhone;
-  if (els.customerFavoriteBtn) {
+  if (!els.printBtn.classList.contains("is-loading")) {
+    els.printBtn.disabled = !hasItems || !validCustomer;
+  }
+  if (!els.saveBillBtn.classList.contains("is-loading")) {
+    els.saveBillBtn.disabled = !hasItems || !validCustomer;
+  }
+  if (!els.whatsappBtn.classList.contains("is-loading")) {
+    els.whatsappBtn.disabled = !hasItems || !validCustomer;
+  }
+  if (!els.customerInfoBtn.classList.contains("is-loading")) {
+    els.customerInfoBtn.disabled = !hasPhone;
+  }
+  if (els.customerFavoriteBtn && !els.customerFavoriteBtn.classList.contains("is-loading")) {
     els.customerFavoriteBtn.disabled = !hasPhone;
   }
 }
@@ -4142,9 +4332,15 @@ function resetBillForm() {
 function saveBill() {
   if (billItems.length === 0) return;
   if (!validateCustomerRequired()) return;
-  saveBillToDatabase("saved")
-    .then(() => resetBillForm())
-    .catch((err) => alert("Could not save bill: " + err.message));
+  withButtonLoading(els.saveBillBtn, async () => {
+    setSectionLoading(els.billingView, true, "Saving bill…");
+    try {
+      await saveBillToDatabase("saved");
+      resetBillForm();
+    } finally {
+      setSectionLoading(els.billingView, false);
+    }
+  }, "Saving…").catch((err) => alert("Could not save bill: " + err.message));
 }
 
 function renderBill() {
@@ -4278,15 +4474,19 @@ async function sendWhatsApp() {
     return;
   }
 
-  els.whatsappBtn.disabled = true;
-  els.whatsappBtn.classList.add("is-busy");
-
   try {
-    const saved = await saveBillToDatabase("whatsapp", { refreshHistory: false });
-    if (!saved) return;
-    await shareBillOnWhatsApp(phone, saved);
-    await refreshBillHistory();
-    resetBillForm();
+    await withButtonLoading(els.whatsappBtn, async () => {
+      setSectionLoading(els.billingView, true, "Sending on WhatsApp…");
+      try {
+        const saved = await saveBillToDatabase("whatsapp", { refreshHistory: false });
+        if (!saved) return;
+        await shareBillOnWhatsApp(phone, saved);
+        await refreshBillHistory({ silent: true });
+        resetBillForm();
+      } finally {
+        setSectionLoading(els.billingView, false);
+      }
+    }, "Sending…");
   } catch (err) {
     const message = err.message || "Unknown error";
     if (isHostedDeployment() && /postgresql|railway|database/i.test(message)) {
@@ -4302,20 +4502,26 @@ async function sendWhatsApp() {
     } else {
       alert("Could not send on WhatsApp: " + message);
     }
-  } finally {
-    els.whatsappBtn.classList.remove("is-busy");
-    updateActionButtons();
   }
 }
 
-function printReceipt() {
+async function printReceipt() {
   if (billItems.length === 0) return;
   if (!validateCustomerRequired()) return;
-  buildReceipt();
-
-  window.print();
-
-  finalizeBill("print");
+  try {
+    await withButtonLoading(els.printBtn, async () => {
+      setSectionLoading(els.billingView, true, "Saving bill…");
+      try {
+        await finalizeBill("print");
+        buildReceipt();
+      } finally {
+        setSectionLoading(els.billingView, false);
+      }
+    }, "Printing…");
+    window.print();
+  } catch (err) {
+    alert("Could not print bill: " + (err.message || err));
+  }
 }
 
 function clearBill() {
@@ -4324,6 +4530,7 @@ function clearBill() {
 }
 
 async function init() {
+  try {
   try {
     await API.health();
   } catch {
@@ -4495,6 +4702,9 @@ async function init() {
       if (!els.offersModal?.classList.contains("hidden")) closeOffersModal();
     }
   });
+  } finally {
+    hideAppLoader();
+  }
 }
 
 init();

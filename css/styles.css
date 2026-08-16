@@ -158,6 +158,7 @@ body {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 .hidden {
@@ -1553,6 +1554,120 @@ select:disabled {
   height: 18px;
 }
 
+.loader-spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid rgba(242, 101, 34, 0.2);
+  border-top-color: var(--orange);
+  border-radius: 50%;
+  animation: loader-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.loader-spinner-sm {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-width: 2px;
+}
+
+.loader-spinner-xs {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-width: 2px;
+}
+
+@keyframes loader-spin {
+  to { transform: rotate(360deg); }
+}
+
+.app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 248, 240, 0.88);
+  backdrop-filter: blur(4px);
+}
+
+.app-loader.hidden {
+  display: none;
+}
+
+.app-loader-card,
+.section-loader-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  background: #fff;
+  border: 2px solid var(--cream-dark, #f0dcc8);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+}
+
+.app-loader-card p,
+.section-loader-text {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.section-loading-root {
+  position: relative;
+}
+
+.section-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 252, 248, 0.72);
+  backdrop-filter: blur(2px);
+  cursor: wait;
+}
+
+.section-loader.hidden {
+  display: none !important;
+}
+
+.btn.is-loading,
+.btn-favorite.is-loading,
+.btn-info.is-loading,
+.btn-remove.is-loading,
+.history-filter.is-loading,
+.history-period-filter.is-loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+.btn.is-loading {
+  gap: 0.4rem;
+}
+
+.btn.is-loading:disabled,
+.btn-primary.is-loading:disabled,
+.btn-whatsapp.is-loading:disabled,
+.btn-history.is-loading:disabled {
+  opacity: 0.92;
+  cursor: wait;
+}
+
+.btn-info.is-loading,
+.btn-favorite.is-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .btn-primary {
   background: var(--orange);
   color: var(--white);
@@ -1832,6 +1947,7 @@ select:disabled {
   flex-direction: column;
   min-height: 0;
   padding: 1rem 1.25rem 1.25rem;
+  position: relative;
 }
 
 .history-toolbar {
@@ -2555,6 +2671,7 @@ select:disabled {
   flex-direction: column;
   min-height: 0;
   padding: 1rem 1.25rem 1.25rem;
+  position: relative;
 }
 
 .expenditure-toolbar {

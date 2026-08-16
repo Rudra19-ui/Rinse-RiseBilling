@@ -4,12 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rinse & Rise — Laundry Billing</title>
-  <link rel="stylesheet" href="css/styles.css?v=20260809">
+  <link rel="stylesheet" href="css/styles.css?v=202608164">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
+  <div id="appLoader" class="app-loader" aria-live="polite" aria-busy="true">
+    <div class="app-loader-card">
+      <div class="loader-spinner" aria-hidden="true"></div>
+      <p>Loading billing…</p>
+    </div>
+  </div>
   <div class="app">
     <!-- Brand Header -->
     <header class="header">
@@ -577,6 +583,6 @@
   <script src="js/api.js?v=202608162"></script>
   <script src="js/invoice-pdf.js?v=20260809"></script>
   <script src="js/history-export.js?v=20260809"></script>
-  <script src="js/app.js?v=202608162"></script>
+  <script src="js/app.js?v=202608164"></script>
 </body>
 </html>
