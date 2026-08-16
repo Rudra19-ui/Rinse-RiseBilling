@@ -67,14 +67,46 @@ const API = {
   },
 
   createBill(bill) {
-    return this.request(
-      "/api/bills",
-      {
-        method: "POST",
-        body: JSON.stringify(bill),
-      },
-      { retries: 2 }
-    );
+    return this.createBillWithUniqueNumber(bill);
+  },
+
+  async createBillWithUniqueNumber(bill) {
+    try {
+      return await this.request(
+        "/api/bills",
+        {
+          method: "POST",
+          body: JSON.stringify(bill),
+        },
+        { retries: 2 }
+      );
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (!/already exists|unique constraint|bills_bill_no/i.test(msg)) {
+        throw err;
+      }
+      const nextNo = await this.nextFreeBillNo();
+      return await this.request(
+        "/api/bills",
+        {
+          method: "POST",
+          body: JSON.stringify({ ...bill, billNo: nextNo }),
+        },
+        { retries: 1 }
+      );
+    }
+  },
+
+  async nextFreeBillNo() {
+    const bills = await this.getBills();
+    const used = new Set((bills || []).map((b) => String(b.billNo || "").trim()));
+    let n = 1;
+    while (n < 1000) {
+      const padded = String(n).padStart(4, "0");
+      if (!used.has(padded) && !used.has(String(n))) return padded;
+      n += 1;
+    }
+    return String(n);
   },
 
   updateBillStatus(billId, deliveryStatus) {

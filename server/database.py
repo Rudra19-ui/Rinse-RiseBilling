@@ -298,7 +298,8 @@ def set_setting(key: str, value: str) -> None:
 
 
 def get_bill_counter() -> int:
-    return int(get_setting("bill_counter", "1"))
+    with get_connection() as conn:
+        return _repair_bill_counter(conn)
 
 
 def set_bill_counter(value: int) -> None:
@@ -453,38 +454,38 @@ def _is_unique_violation(exc: Exception) -> bool:
     return "unique constraint" in msg or "duplicate key" in msg or "bills_bill_no_key" in msg
 
 
-def _shop_bill_numbers(conn: DbConnection) -> list[int]:
-    rows = conn.execute("SELECT bill_no FROM bills").fetchall()
-    numbers: list[int] = []
-    for row in rows:
-        raw = str(row["bill_no"] or "").strip()
-        if raw.isdigit() and 1 <= int(raw) < 1000:
-            numbers.append(int(raw))
-    return numbers
+def _existing_bill_nos(conn: DbConnection) -> set[str]:
+    return {
+        str(row["bill_no"] or "").strip()
+        for row in conn.execute("SELECT bill_no FROM bills").fetchall()
+    }
 
 
-def _repair_bill_counter(conn: DbConnection) -> None:
-    """If test/manual bill numbers jumped the counter (e.g. 10000), restore shop sequence."""
-    numbers = _shop_bill_numbers(conn)
-    next_no = (max(numbers) + 1) if numbers else 1
+def _shop_sequence_next(existing: set[str]) -> int:
+    numbers = [int(n) for n in existing if n.isdigit() and 1 <= int(n) < 1000]
+    return (max(numbers) + 1) if numbers else 1
+
+
+def _repair_bill_counter(conn: DbConnection) -> int:
+    """Keep counter on the next free shop bill number (skip 10000+ test numbers)."""
+    next_no = _shop_sequence_next(_existing_bill_nos(conn))
     row = conn.execute("SELECT value FROM settings WHERE key = ?", ("bill_counter",)).fetchone()
-    stored = int(row["value"]) if row else 1
-    if stored > 200 and stored > next_no + 10:
+    stored = int(row["value"]) if row else 0
+    if stored != next_no:
         conn.execute(
             "UPDATE settings SET value = ? WHERE key = ?",
             (str(next_no), "bill_counter"),
         )
+    return next_no
 
 
 def _allocate_bill_no(conn: DbConnection) -> str:
-    n = _read_bill_counter(conn)
-    numbers = set(_shop_bill_numbers(conn))
-    if n > 200 and n > (max(numbers) + 10 if numbers else 1):
-        n = (max(numbers) + 1) if numbers else 1
-    for _ in range(200):
+    _read_bill_counter(conn)  # lock settings row
+    existing = _existing_bill_nos(conn)
+    n = _shop_sequence_next(existing)
+    for _ in range(500):
         bill_no = str(n).zfill(4)
-        exists = conn.execute("SELECT 1 FROM bills WHERE bill_no = ?", (bill_no,)).fetchone()
-        if not exists:
+        if bill_no not in existing and str(n) not in existing:
             conn.execute(
                 "UPDATE settings SET value = ? WHERE key = ?",
                 (str(n + 1), "bill_counter"),

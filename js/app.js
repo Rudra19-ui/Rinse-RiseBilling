@@ -1108,6 +1108,13 @@ async function migrateLocalStorageIfNeeded() {
 async function loadBillCounter() {
   const data = await API.getBillCounter();
   billCounter = data.billCounter;
+  if (!billCounter || billCounter >= 1000) {
+    try {
+      billCounter = parseInt(await API.nextFreeBillNo(), 10) || 1;
+    } catch {
+      billCounter = 1;
+    }
+  }
   updateBillMeta();
 }
 
