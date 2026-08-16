@@ -2643,12 +2643,24 @@ async function saveBillToDatabase(sentVia, { refreshHistory = true } = {}) {
   if (billItems.length === 0) return null;
   if (!validateCustomerRequired()) return null;
   const saved = await API.createBill(buildCurrentBillPayload(sentVia));
-  if (refreshHistory) {
-    await refreshBillHistory();
+  if (saved?.billNo) {
+    const parsed = parseInt(String(saved.billNo).replace(/\D/g, ""), 10);
+    if (!Number.isNaN(parsed)) billCounter = parsed + 1;
   }
-  const counterData = await API.getBillCounter();
-  billCounter = counterData.billCounter;
-  updateBillMeta();
+  if (refreshHistory) {
+    try {
+      await refreshBillHistory();
+    } catch {
+      /* Bill is already saved — don't fail the whole action. */
+    }
+  }
+  try {
+    const counterData = await API.getBillCounter();
+    billCounter = counterData.billCounter;
+    updateBillMeta();
+  } catch {
+    updateBillMeta();
+  }
   return saved;
 }
 

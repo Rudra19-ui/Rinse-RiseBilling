@@ -172,10 +172,7 @@ def init_db() -> None:
                 ("bill_counter", "1"),
             )
         _run_schema_migrations(conn)
-        if is_postgres():
-            conn.commit()
-            return
-
+        _repair_bill_counter(conn)
         conn.commit()
 
 
@@ -451,6 +448,52 @@ def get_bills_by_phone(phone_key: str) -> list[dict[str, Any]]:
 T = TypeVar("T")
 
 
+def _is_unique_violation(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "unique constraint" in msg or "duplicate key" in msg or "bills_bill_no_key" in msg
+
+
+def _shop_bill_numbers(conn: DbConnection) -> list[int]:
+    rows = conn.execute("SELECT bill_no FROM bills").fetchall()
+    numbers: list[int] = []
+    for row in rows:
+        raw = str(row["bill_no"] or "").strip()
+        if raw.isdigit() and 1 <= int(raw) < 1000:
+            numbers.append(int(raw))
+    return numbers
+
+
+def _repair_bill_counter(conn: DbConnection) -> None:
+    """If test/manual bill numbers jumped the counter (e.g. 10000), restore shop sequence."""
+    numbers = _shop_bill_numbers(conn)
+    next_no = (max(numbers) + 1) if numbers else 1
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", ("bill_counter",)).fetchone()
+    stored = int(row["value"]) if row else 1
+    if stored > 200 and stored > next_no + 10:
+        conn.execute(
+            "UPDATE settings SET value = ? WHERE key = ?",
+            (str(next_no), "bill_counter"),
+        )
+
+
+def _allocate_bill_no(conn: DbConnection) -> str:
+    n = _read_bill_counter(conn)
+    numbers = set(_shop_bill_numbers(conn))
+    if n > 200 and n > (max(numbers) + 10 if numbers else 1):
+        n = (max(numbers) + 1) if numbers else 1
+    for _ in range(200):
+        bill_no = str(n).zfill(4)
+        exists = conn.execute("SELECT 1 FROM bills WHERE bill_no = ?", (bill_no,)).fetchone()
+        if not exists:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = ?",
+                (str(n + 1), "bill_counter"),
+            )
+            return bill_no
+        n += 1
+    raise RuntimeError("Could not allocate a new bill number.")
+
+
 def _retry_on_deadlock(func: Callable[[], T], *, attempts: int = 4) -> T:
     last_error: Exception | None = None
     for attempt in range(attempts):
@@ -458,11 +501,8 @@ def _retry_on_deadlock(func: Callable[[], T], *, attempts: int = 4) -> T:
             return func()
         except Exception as exc:
             last_error = exc
-            if (
-                is_postgres()
-                and "deadlock detected" in str(exc).lower()
-                and attempt < attempts - 1
-            ):
+            retryable = "deadlock detected" in str(exc).lower() or _is_unique_violation(exc)
+            if is_postgres() and retryable and attempt < attempts - 1:
                 time.sleep(0.05 * (2**attempt))
                 continue
             raise
@@ -536,15 +576,21 @@ def mark_bill_sent_via(bill_id: int, sent_via: str) -> None:
         conn.commit()
 
 
-def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
+def create_bill(payload: dict[str, Any], *, honor_bill_no: bool = False) -> dict[str, Any]:
     def _create() -> dict[str, Any]:
         now = payload.get("createdAt") or utc_now_iso()
         phone = payload.get("customerPhone", "")
         name = payload.get("customerName", "")
 
         with get_connection() as conn:
-            counter = _read_bill_counter(conn)
-            bill_no = payload.get("billNo") or str(counter).zfill(4)
+            requested = str(payload.get("billNo") or "").strip()
+            if honor_bill_no and requested:
+                exists = conn.execute(
+                    "SELECT 1 FROM bills WHERE bill_no = ?", (requested,)
+                ).fetchone()
+                bill_no = requested if not exists else _allocate_bill_no(conn)
+            else:
+                bill_no = _allocate_bill_no(conn)
             phone_key = upsert_customer(phone, name, conn)
 
             bill_id = conn.insert_returning_id(
@@ -604,18 +650,6 @@ def create_bill(payload: dict[str, Any]) -> dict[str, Any]:
                     ),
                 )
 
-            try:
-                bill_num = int("".join(c for c in str(bill_no) if c.isdigit()) or "0")
-            except ValueError:
-                bill_num = counter
-            next_counter = max(counter + 1, bill_num + 1)
-            conn.execute(
-                """
-                INSERT INTO settings (key, value) VALUES ('bill_counter', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (str(next_counter),),
-            )
             conn.commit()
 
             row = conn.execute("SELECT * FROM bills WHERE id = ?", (bill_id,)).fetchone()
@@ -1010,12 +1044,13 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
                 "deliveryStatus": bill.get("deliveryStatus", "pending"),
                 "completedAt": bill.get("completedAt"),
                 "items": bill.get("items", []),
-            }
+            },
+            honor_bill_no=True,
         )
         existing.add(bill_no)
         imported += 1
 
-    if counter > get_bill_counter():
+    if 1 <= counter < 1000 and counter > get_bill_counter():
         set_bill_counter(counter)
 
     return {"imported": imported, "billCounter": get_bill_counter()}

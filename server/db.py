@@ -411,6 +411,7 @@ def get_connection() -> Iterator[DbConnection]:
                     url,
                     cursor_factory=RealDictCursor,
                     connect_timeout=10,
+                    options="-c statement_timeout=15000 -c lock_timeout=8000",
                 )
                 wrapper = DbConnection(conn, True)
                 try:

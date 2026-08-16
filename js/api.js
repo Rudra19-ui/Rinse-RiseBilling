@@ -1,36 +1,57 @@
 /** API client — all billing data stored in SQLite via Flask backend. */
 
 const API = {
-  async request(path, options = {}) {
-    const res = await fetch(path, {
-      headers: { "Content-Type": "application/json", ...options.headers },
-      ...options,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      let msg = err.error || `Request failed (${res.status})`;
-      if (res.status === 503 && err.code === "database_unavailable") {
-        msg =
-          err.error ||
-          "Database is not connected on the hosted server. Fix DATABASE_URL in Railway Variables and redeploy.";
+  async request(path, options = {}, { retries = 0 } = {}) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        const res = await fetch(path, {
+          headers: { "Content-Type": "application/json", ...options.headers },
+          ...options,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          let msg = err.error || `Request failed (${res.status})`;
+          if (res.status === 503 && err.code === "database_unavailable") {
+            msg =
+              err.error ||
+              "Database is not connected on the hosted server. Fix DATABASE_URL in Railway Variables and redeploy.";
+          }
+          if (res.status === 500 && /deadlock detected/i.test(msg)) {
+            msg =
+              "Database was busy for a moment. Click Save Bill again — check History in case the bill was already saved.";
+          }
+          if (res.status === 404 && path.includes("/send-whatsapp")) {
+            throw new Error(
+              "WhatsApp send API not found. Please restart Start Billing.bat and refresh the page (Ctrl+F5)."
+            );
+          }
+          if (res.status === 405) {
+            throw new Error(
+              "Server needs a restart. Close Start Billing.bat, run it again, then press Ctrl+F5."
+            );
+          }
+          throw new Error(msg);
+        }
+        return await res.json();
+      } catch (err) {
+        lastError = err;
+        const isNetwork =
+          err instanceof TypeError ||
+          /failed to fetch|networkerror|load failed/i.test(String(err?.message || err));
+        if (isNetwork && attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+          continue;
+        }
+        if (isNetwork) {
+          throw new Error(
+            "Could not reach the billing server. Check your internet, wait a few seconds, then try Save Bill again. If it still fails, refresh the page (Ctrl+Shift+R)."
+          );
+        }
+        throw err;
       }
-      if (res.status === 500 && /deadlock detected/i.test(msg)) {
-        msg =
-          "Database was busy for a moment. Click Send on WhatsApp again — check History in case the bill was already saved.";
-      }
-      if (res.status === 404 && path.includes("/send-whatsapp")) {
-        throw new Error(
-          "WhatsApp send API not found. Please restart Start Billing.bat and refresh the page (Ctrl+F5)."
-        );
-      }
-      if (res.status === 405) {
-        throw new Error(
-          "Server needs a restart. Close Start Billing.bat, run it again, then press Ctrl+F5."
-        );
-      }
-      throw new Error(msg);
     }
-    return res.json();
+    throw lastError || new Error("Request failed.");
   },
 
   health() {
@@ -46,10 +67,14 @@ const API = {
   },
 
   createBill(bill) {
-    return this.request("/api/bills", {
-      method: "POST",
-      body: JSON.stringify(bill),
-    });
+    return this.request(
+      "/api/bills",
+      {
+        method: "POST",
+        body: JSON.stringify(bill),
+      },
+      { retries: 2 }
+    );
   },
 
   updateBillStatus(billId, deliveryStatus) {

@@ -81,6 +81,8 @@ def _friendly_db_error(exc: Exception) -> str:
             "Database was busy for a moment (deadlock). "
             "Please click Send on WhatsApp again — your bill may already be saved in History."
         )
+    if "duplicate key" in msg.lower() or "unique constraint" in msg.lower():
+        return "Could not save this bill number because it already exists. Please try Save Bill again."
     if "Database not ready:" in msg:
         return msg.replace("Database not ready: ", "", 1)
     return msg
@@ -188,7 +190,10 @@ def api_create_bill():
     data = request.get_json(force=True, silent=True) or {}
     if not data.get("items"):
         return jsonify({"error": "Bill must have at least one item"}), 400
-    bill = create_bill(data)
+    try:
+        bill = create_bill(data)
+    except Exception as exc:
+        return jsonify({"error": _friendly_db_error(exc)}), 500
     return jsonify(bill), 201
 
 
