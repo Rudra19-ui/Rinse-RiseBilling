@@ -3456,6 +3456,92 @@ select:disabled {
   font-size: 1.1rem;
 }
 
+/* ===== APP ALERT MODAL ===== */
+.app-alert-modal {
+  z-index: 10050;
+}
+
+.app-alert-content {
+  max-width: 420px;
+  padding: 1.35rem 1.35rem 1.15rem;
+  text-align: center;
+}
+
+.app-alert-content[data-variant="warning"] .app-alert-icon {
+  background: #fff4e5;
+  color: #b45309;
+  border: 2px solid #fdba74;
+}
+
+.app-alert-content[data-variant="error"] .app-alert-icon {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 2px solid #fca5a5;
+}
+
+.app-alert-icon {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 0.85rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 800;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 2px solid #93c5fd;
+}
+
+.app-alert-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.12rem;
+  color: var(--text);
+}
+
+.app-alert-body {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.app-alert-body p {
+  margin: 0 0 0.65rem;
+}
+
+.app-alert-body p:last-child {
+  margin-bottom: 0;
+}
+
+.app-alert-list {
+  margin: 0.35rem 0 0.85rem;
+  padding-left: 1.15rem;
+}
+
+.app-alert-list li {
+  margin-bottom: 0.35rem;
+}
+
+.app-alert-steps {
+  padding: 0.65rem 0.75rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.app-alert-actions {
+  margin-top: 1.1rem;
+  display: flex;
+  justify-content: center;
+}
+
+.app-alert-actions .btn {
+  min-width: 110px;
+}
+
 /* ===== WHATSAPP TOAST ===== */
 .whatsapp-toast {
   position: fixed;

@@ -599,15 +599,11 @@ function validateCustomerRequired() {
 
 function validatePaymentRequired(paymentType, paymentInfo, { fromHistory = false } = {}) {
   const missing = [];
-  if (!paymentType) missing.push("Payment Type");
-  if (!paymentInfo) missing.push("Payment Info");
+  if (!(paymentType || "").trim()) missing.push("paymentType");
+  if (!(paymentInfo || "").trim()) missing.push("paymentInfo");
   if (!missing.length) return true;
 
-  const fields = missing.join(" and ");
-  const hint = fromHistory
-    ? "\n\nClick Edit Order, select both fields, save, then try Send on WhatsApp again."
-    : "\n\nSelect Cash or UPI Online under Payment Type, and Pre Payment or Post Payment under Payment Info.";
-  alert(`Please select ${fields} before sending on WhatsApp.${hint}`);
+  showWhatsAppValidationAlert(getWhatsAppPaymentBlockMessage(missing));
   if (!fromHistory) {
     document.querySelector(".payment-section")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -616,11 +612,77 @@ function validatePaymentRequired(paymentType, paymentInfo, { fromHistory = false
 
 function validateOrderDoneForWhatsApp(deliveryStatus) {
   if (deliveryStatus === "done") return true;
-  alert(
-    "WhatsApp bill can only be sent after delivery is complete.\n\n" +
-      "Mark the order as Delivery Done first, then use Send on WhatsApp."
-  );
+  showWhatsAppValidationAlert(getWhatsAppDeliveryBlockMessage());
   return false;
+}
+
+function getWhatsAppPaymentBlockMessage(missingFields) {
+  const items = [];
+  if (missingFields.includes("paymentType")) {
+    items.push("<li><strong>Payment Type</strong> — Cash or UPI Online</li>");
+  }
+  if (missingFields.includes("paymentInfo")) {
+    items.push("<li><strong>Payment Info</strong> — Pre Payment or Post Payment</li>");
+  }
+  return {
+    title: "Complete payment details",
+    html:
+      "<p>Fill in the payment details before sending this bill on WhatsApp:</p>" +
+      `<ul class="app-alert-list">${items.join("")}</ul>` +
+      '<p class="app-alert-steps">Click <strong>Edit Order</strong>, select the missing fields, save, then tap <strong>Send on WhatsApp</strong> again.</p>',
+  };
+}
+
+function getWhatsAppDeliveryBlockMessage({ fromBilling = false } = {}) {
+  const steps = fromBilling
+    ? "Save this bill, open <strong>History</strong>, mark <strong>Delivery Done</strong>, then use <strong>Send on WhatsApp</strong>."
+    : "Mark this order as <strong>Delivery Done</strong>, then use <strong>Send on WhatsApp</strong>.";
+  return {
+    title: "Delivery not complete",
+    html:
+      "<p>WhatsApp bills are sent only after the order is delivered to the customer.</p>" +
+      `<p class="app-alert-steps">${steps}</p>`,
+  };
+}
+
+function parseWhatsAppSendError(message) {
+  const msg = String(message || "");
+  if (/payment type is required/i.test(msg)) return getWhatsAppPaymentBlockMessage(["paymentType"]);
+  if (/payment info is required/i.test(msg)) return getWhatsAppPaymentBlockMessage(["paymentInfo"]);
+  if (/delivery done/i.test(msg)) return getWhatsAppDeliveryBlockMessage();
+  return null;
+}
+
+function showWhatsAppValidationAlert(block) {
+  showAppAlert({ title: block.title, html: block.html, variant: "warning" });
+}
+
+function showAppAlert({ title = "Notice", message = "", html = "", variant = "info" } = {}) {
+  const modal = $("#appAlertModal");
+  const content = modal?.querySelector(".app-alert-content");
+  const titleEl = $("#appAlertTitle");
+  const bodyEl = $("#appAlertBody");
+  if (!modal || !content || !titleEl || !bodyEl) {
+    alert(message || title);
+    return;
+  }
+  content.dataset.variant = variant;
+  titleEl.textContent = title;
+  if (html) {
+    bodyEl.innerHTML = html;
+  } else {
+    bodyEl.textContent = message;
+  }
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  $("#appAlertOkBtn")?.focus();
+}
+
+function closeAppAlert() {
+  const modal = $("#appAlertModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
 }
 
 function updateDeliveryDisplay() {
@@ -2340,7 +2402,15 @@ function startPendingWhatsAppWatcher(billId) {
         refreshWhatsAppStatus();
       } else if (result.error) {
         stopPendingWhatsAppWatcher();
-        alert("Could not send PDF: " + result.error);
+        const block = parseWhatsAppSendError(result.error);
+        if (block) showWhatsAppValidationAlert(block);
+        else {
+          showAppAlert({
+            title: "Could not send on WhatsApp",
+            message: result.error,
+            variant: "error",
+          });
+        }
       }
     } catch {
       /* keep polling until connected */
@@ -4295,7 +4365,11 @@ function printHistoryBill(bill, btn) {
 async function sendHistoryWhatsApp(bill, btn) {
   const phone = formatPhoneForWhatsApp(bill.customerPhone);
   if (phone.length < 12) {
-    alert("This bill has no valid phone number.");
+    showAppAlert({
+      title: "Phone number missing",
+      message: "This bill does not have a valid customer phone number.",
+      variant: "warning",
+    });
     return;
   }
   if (!validatePaymentRequired(bill.paymentType, bill.paymentInfo, { fromHistory: true })) {
@@ -4314,7 +4388,16 @@ async function sendHistoryWhatsApp(bill, btn) {
       }
     }, "Sending…");
   } catch (err) {
-    alert("Could not send PDF on WhatsApp: " + err.message);
+    const block = parseWhatsAppSendError(err.message);
+    if (block) {
+      showWhatsAppValidationAlert(block);
+      return;
+    }
+    showAppAlert({
+      title: "Could not send on WhatsApp",
+      message: err.message || "Something went wrong. Please try again.",
+      variant: "error",
+    });
     try {
       await downloadBillInvoicePdf(bill);
     } catch {
@@ -4496,10 +4579,7 @@ function buildReceipt() {
 }
 
 async function sendWhatsApp() {
-  alert(
-    "WhatsApp bill can only be sent after delivery is complete.\n\n" +
-      "Save the bill, open History, mark Delivery Done, then use Send on WhatsApp."
-  );
+  showWhatsAppValidationAlert(getWhatsAppDeliveryBlockMessage({ fromBilling: true }));
 }
 
 async function printReceipt() {
@@ -4647,6 +4727,8 @@ async function init() {
   els.whatsappStatusPill?.addEventListener("click", () => openWhatsAppConnectModal());
   els.closeWhatsAppConnect?.addEventListener("click", closeWhatsAppConnectModal);
   els.whatsappConnectBackdrop?.addEventListener("click", closeWhatsAppConnectModal);
+  $("#appAlertOkBtn")?.addEventListener("click", closeAppAlert);
+  $("#appAlertBackdrop")?.addEventListener("click", closeAppAlert);
   els.offersBtn?.addEventListener("click", openOffersModal);
   els.offersManageBtn?.addEventListener("click", requestOffersManageAccess);
   els.offersDoneManageBtn?.addEventListener("click", exitOffersManageMode);
@@ -4697,6 +4779,7 @@ async function init() {
       if (!els.whatsappConnectModal?.classList.contains("hidden")) closeWhatsAppConnectModal();
       if (!els.expenditurePasswordModal?.classList.contains("hidden")) closeExpenditurePasswordModal();
       if (!els.offersModal?.classList.contains("hidden")) closeOffersModal();
+      if (!$("#appAlertModal")?.classList.contains("hidden")) closeAppAlert();
     }
   });
   } finally {
