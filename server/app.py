@@ -332,7 +332,7 @@ def api_send_bill_whatsapp(bill_id: int):
         return jsonify({"error": "Payment Type is required before sending on WhatsApp."}), 400
     if not (bill.get("paymentInfo") or "").strip():
         return jsonify({"error": "Payment Info is required before sending on WhatsApp."}), 400
-    if (bill.get("deliveryStatus") or "").strip() != "done":
+    if (bill.get("deliveryStatus") or "").strip() != "done" and (bill.get("sentVia") or "").strip() != "whatsapp":
         return jsonify({"error": "Order must be marked Delivery Done before sending on WhatsApp."}), 400
     try:
         result = send_bill_via_whatsapp(bill)

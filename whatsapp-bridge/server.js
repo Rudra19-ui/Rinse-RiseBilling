@@ -153,11 +153,33 @@ function markReady(source) {
   state.qr = null;
   state.lastError = null;
   state.loadingPercent = 100;
-  state.phase = "ready";
-  state.ready = true;
+  state.phase = "connecting";
   state.authenticatingSince = null;
   markSessionLinked();
-  console.log(`[WhatsApp] Connected and ready (${source}).`);
+  console.log(`[WhatsApp] CONNECTED (${source}) — waiting for chat store…`);
+
+  waitForStoreReady(60000)
+    .then((storeOk) => {
+      if (storeOk) {
+        state.phase = "ready";
+        state.ready = true;
+        state.lastError = null;
+        console.log(`[WhatsApp] Connected and ready (${source}).`);
+        return;
+      }
+      state.phase = "loading";
+      state.ready = false;
+      state.lastError =
+        "WhatsApp linked — chat system still loading. Wait about 1 minute, then try sending again.";
+      startStoreReadyPoll();
+    })
+    .catch((err) => {
+      console.warn("[WhatsApp] Store wait failed:", err.message);
+      state.phase = "loading";
+      state.ready = false;
+      state.lastError = "WhatsApp linked — still starting up. Wait a minute and try again.";
+      startStoreReadyPoll();
+    });
 }
 
 function startConnectedPoll(waClient) {
@@ -237,6 +259,7 @@ function isSessionError(err) {
   const msg = String(err?.message || err).toLowerCase();
   return (
     isCommsError(err) ||
+    isStoreError(err) ||
     msg.includes("detached frame") ||
     msg.includes("target closed") ||
     msg.includes("session closed") ||
@@ -245,6 +268,66 @@ function isSessionError(err) {
     msg.includes("page has been closed") ||
     msg.includes("browser has disconnected")
   );
+}
+
+function isStoreError(err) {
+  const msg = String(err?.message || err).toLowerCase();
+  return (
+    err?.code === "STORE_NOT_READY" ||
+    msg.includes("getchat") ||
+    msg.includes("cannot read properties of undefined") ||
+    msg.includes("chat store") ||
+    msg.includes("still loading")
+  );
+}
+
+async function isWhatsAppStoreReady() {
+  if (!client?.pupPage) return false;
+  try {
+    return await client.pupPage.evaluate(() => {
+      try {
+        const collections = window.require?.("WAWebCollections");
+        const chat = collections?.Chat;
+        return Boolean(chat && typeof chat.get === "function");
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function waitForStoreReady(timeoutMs = 60000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await isWhatsAppStoreReady()) return true;
+    await sleep(1000);
+  }
+  return false;
+}
+
+function startStoreReadyPoll() {
+  if (startStoreReadyPoll._timer) return;
+  startStoreReadyPoll._timer = setInterval(async () => {
+    if (state.ready || !client) {
+      clearInterval(startStoreReadyPoll._timer);
+      startStoreReadyPoll._timer = null;
+      return;
+    }
+    try {
+      if (await isWhatsAppStoreReady()) {
+        state.phase = "ready";
+        state.ready = true;
+        state.lastError = null;
+        console.log("[WhatsApp] Chat store ready.");
+        clearInterval(startStoreReadyPoll._timer);
+        startStoreReadyPoll._timer = null;
+      }
+    } catch (err) {
+      console.warn("[WhatsApp] Store poll:", err.message);
+    }
+  }, 2000);
 }
 
 function createClient() {
@@ -557,7 +640,9 @@ async function resolveSendTargets(digits) {
   for (const chatId of ordered) {
     await ensureChatRegistered(chatId);
     try {
-      await client.getChatById(chatId);
+      if (await isWhatsAppStoreReady()) {
+        await client.getChatById(chatId);
+      }
     } catch {
       /* chat may still send on next step */
     }
@@ -572,6 +657,18 @@ async function assertSendReady() {
   if (waState !== "CONNECTED") {
     state.ready = false;
     throw new Error(`WhatsApp not fully connected (${waState || "unknown"}).`);
+  }
+  const storeReady = await isWhatsAppStoreReady();
+  if (!storeReady) {
+    state.ready = false;
+    state.phase = "loading";
+    state.lastError = "WhatsApp chat system is still loading. Wait 30 seconds and try again.";
+    startStoreReadyPoll();
+    const err = new Error(
+      "WhatsApp is still loading. Wait about 30 seconds, then try Send on WhatsApp again."
+    );
+    err.code = "STORE_NOT_READY";
+    throw err;
   }
 }
 
@@ -681,14 +778,24 @@ app.post("/send", async (req, res) => {
         console.error("[WhatsApp] Send session error:", err.message);
         const reconnected = await softRecoverClient(err.message);
         if (!reconnected) {
+          const friendly = isStoreError(err)
+            ? "WhatsApp chat system is not ready yet. Wait 1 minute, open WhatsApp in the header, then try again."
+            : "WhatsApp send layer not ready. Open WhatsApp in the header, scan QR if shown, wait 10 seconds, then try again.";
           return res.status(503).json({
-            error:
-              "WhatsApp send layer not ready. Open WhatsApp in the header, scan QR if shown, wait 10 seconds, then try again.",
+            error: friendly,
             needsReconnect: true,
           });
         }
         await performSend(digits, message, filePath, filename);
         return res.json({ ok: true, recovered: true });
+      }
+
+      if (isStoreError(err)) {
+        return res.status(503).json({
+          error:
+            "WhatsApp is still loading its chat system. Wait about 1 minute, then try Send on WhatsApp again.",
+          needsReconnect: true,
+        });
       }
 
       if (isLidError(err)) {

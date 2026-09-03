@@ -102,6 +102,7 @@ const els = {
   expenditurePasswordForm: $("#expenditurePasswordForm"),
   expenditurePasswordInput: $("#expenditurePasswordInput"),
   expenditurePasswordError: $("#expenditurePasswordError"),
+  expenditurePasswordSubtitle: $("#expenditurePasswordSubtitle"),
   closeExpenditurePassword: $("#closeExpenditurePassword"),
   cancelExpenditurePassword: $("#cancelExpenditurePassword"),
   offersBtn: $("#offersBtn"),
@@ -114,6 +115,7 @@ const els = {
 };
 
 const EXPENDITURE_PASSWORD = "NihkilDada@22";
+let passwordGateTarget = null;
 let offersCache = [];
 let offersEditUnlocked = false;
 let offersEditingId = null;
@@ -610,10 +612,24 @@ function validatePaymentRequired(paymentType, paymentInfo, { fromHistory = false
   return false;
 }
 
-function validateOrderDoneForWhatsApp(deliveryStatus) {
-  if (deliveryStatus === "done") return true;
+function validateOrderDoneForWhatsApp(deliveryStatus, { resend = false } = {}) {
+  if (deliveryStatus === "done" || resend) return true;
   showWhatsAppValidationAlert(getWhatsAppDeliveryBlockMessage());
   return false;
+}
+
+function billWasSentOnWhatsApp(bill) {
+  return bill?.sentVia === "whatsapp";
+}
+
+function canSendBillOnWhatsApp(bill) {
+  if (normalizePhoneKey(bill?.customerPhone || "").length < 10) return false;
+  if (billWasSentOnWhatsApp(bill)) return true;
+  return getDeliveryStatus(bill) === "done";
+}
+
+function getWhatsAppSendButtonLabel(bill) {
+  return billWasSentOnWhatsApp(bill) ? "Send Again on WhatsApp" : "Send on WhatsApp";
 }
 
 function getWhatsAppPaymentBlockMessage(missingFields) {
@@ -645,12 +661,31 @@ function getWhatsAppDeliveryBlockMessage({ fromBilling = false } = {}) {
   };
 }
 
+function getWhatsAppConnectionBlockMessage() {
+  return {
+    title: "WhatsApp not ready",
+    html:
+      "<p>WhatsApp is connected but still finishing setup in the background.</p>" +
+      '<p class="app-alert-steps">Wait about <strong>1 minute</strong>, check the WhatsApp status in the header shows connected, then tap <strong>Send on WhatsApp</strong> again.<br><br>If it keeps failing, open WhatsApp settings, click <strong>Reset Connection</strong>, scan the QR code again, and retry.</p>',
+  };
+}
+
 function parseWhatsAppSendError(message) {
   const msg = String(message || "");
   if (/payment type is required/i.test(msg)) return getWhatsAppPaymentBlockMessage(["paymentType"]);
   if (/payment info is required/i.test(msg)) return getWhatsAppPaymentBlockMessage(["paymentInfo"]);
   if (/delivery done/i.test(msg)) return getWhatsAppDeliveryBlockMessage();
+  if (/getchat|still loading|chat system|chat store|not ready yet/i.test(msg)) {
+    return getWhatsAppConnectionBlockMessage();
+  }
   return null;
+}
+
+function isWhatsAppReconnectError(message) {
+  const msg = String(message || "");
+  return /getchat|still loading|chat system|chat store|detached frame|session expired|not connected|reconnect|startcomms|sendiq|\[comms\]/i.test(
+    msg
+  );
 }
 
 function showWhatsAppValidationAlert(block) {
@@ -2453,7 +2488,9 @@ async function shareBillOnWhatsApp(phone, bill) {
 
   if (result.sent) {
     showWhatsAppToast(
-      "<strong>Invoice PDF sent!</strong>The PDF invoice was delivered on WhatsApp."
+      billWasSentOnWhatsApp(bill)
+        ? "<strong>Invoice sent again!</strong>The PDF invoice was delivered on WhatsApp once more."
+        : "<strong>Invoice PDF sent!</strong>The PDF invoice was delivered on WhatsApp."
     );
     refreshWhatsAppStatus();
     return true;
@@ -2471,8 +2508,7 @@ async function shareBillOnWhatsApp(phone, bill) {
 
   if (result.reason === "send_failed" && result.error) {
     const needsReconnect =
-      result.needsReconnect ||
-      /detached frame|session expired|not connected|reconnect|startcomms|sendiq|\[comms\]/i.test(result.error);
+      result.needsReconnect || isWhatsAppReconnectError(result.error);
     if (needsReconnect) {
       pendingWhatsAppBillId = bill.id;
       openWhatsAppConnectModal();
@@ -2986,8 +3022,15 @@ async function deleteExpenditureEntry(id, btn) {
   }
 }
 
-function openExpenditurePasswordModal() {
+function openExpenditurePasswordModal(target = "expenditure") {
   if (!els.expenditurePasswordModal) return;
+  passwordGateTarget = target;
+  if (els.expenditurePasswordSubtitle) {
+    els.expenditurePasswordSubtitle.textContent =
+      target === "overallStats"
+        ? "Required to open Over All Statistics"
+        : "Required to open Shop Expenditure";
+  }
   els.expenditurePasswordError?.classList.add("hidden");
   els.expenditurePasswordForm?.reset();
   els.expenditurePasswordModal.classList.remove("hidden");
@@ -2999,6 +3042,7 @@ function closeExpenditurePasswordModal() {
   if (!els.expenditurePasswordModal) return;
   els.expenditurePasswordModal.classList.add("hidden");
   els.expenditurePasswordError?.classList.add("hidden");
+  passwordGateTarget = null;
   document.body.style.overflow = "";
 }
 
@@ -3010,16 +3054,26 @@ function handleExpenditurePasswordSubmit(e) {
     els.expenditurePasswordInput?.select();
     return;
   }
+  const target = passwordGateTarget || "expenditure";
   const openBtn = els.expenditurePasswordForm?.querySelector("button[type=submit]");
   withButtonLoading(openBtn, async () => {
     closeExpenditurePasswordModal();
-    await showExpenditureView();
+    if (target === "overallStats") {
+      await loadAndShowOverallStatsReport();
+    } else {
+      await showExpenditureView();
+    }
   }, "Opening…");
 }
 
 function requestExpenditureAccess() {
   if (els.expenditureView && !els.expenditureView.classList.contains("hidden")) return;
-  openExpenditurePasswordModal();
+  openExpenditurePasswordModal("expenditure");
+}
+
+function requestOverallStatsAccess() {
+  if (els.overallStatsModal && !els.overallStatsModal.classList.contains("hidden")) return;
+  openExpenditurePasswordModal("overallStats");
 }
 
 function showExpenditureView() {
@@ -3470,7 +3524,7 @@ function renderOverallStatsReport(data) {
   `;
 }
 
-async function showOverallStatsReport() {
+async function loadAndShowOverallStatsReport() {
   try {
     await withButtonLoading(els.overallStatsBtn, async () => {
       setSectionLoading(els.historyView, true, "Loading statistics…");
@@ -3492,6 +3546,10 @@ async function showOverallStatsReport() {
   } catch (err) {
     alert("Could not load overall statistics: " + err.message);
   }
+}
+
+function showOverallStatsReport() {
+  requestOverallStatsAccess();
 }
 
 function hideOverallStatsReport() {
@@ -4263,7 +4321,7 @@ function renderHistoryDetail(bill) {
       ${orderReadyBtn}
       ${statusBtn}
       <button type="button" class="btn btn-primary" data-action="reprint" data-id="${bill.id}">Print Again</button>
-      ${status === "done" && bill.customerPhone ? `<button type="button" class="btn btn-whatsapp" data-action="resend" data-id="${bill.id}">Send on WhatsApp</button>` : ""}
+      ${canSendBillOnWhatsApp(bill) ? `<button type="button" class="btn btn-whatsapp" data-action="resend" data-id="${bill.id}">${getWhatsAppSendButtonLabel(bill)}</button>` : ""}
     </div>
   `;
 
@@ -4375,7 +4433,7 @@ async function sendHistoryWhatsApp(bill, btn) {
   if (!validatePaymentRequired(bill.paymentType, bill.paymentInfo, { fromHistory: true })) {
     return;
   }
-  if (!validateOrderDoneForWhatsApp(bill.deliveryStatus)) {
+  if (!validateOrderDoneForWhatsApp(bill.deliveryStatus, { resend: billWasSentOnWhatsApp(bill) })) {
     return;
   }
   try {
@@ -4383,6 +4441,13 @@ async function sendHistoryWhatsApp(bill, btn) {
       setSectionLoading(els.historyView, true, "Sending on WhatsApp…");
       try {
         await shareBillOnWhatsApp(phone, bill);
+        await refreshBillHistory({ silent: true });
+        const updated = billHistoryCache.find((b) => b.id === bill.id);
+        if (updated) {
+          selectedHistoryId = updated.id;
+          renderHistoryList();
+          renderHistoryDetail(updated);
+        }
       } finally {
         setSectionLoading(els.historyView, false);
       }
@@ -4391,6 +4456,11 @@ async function sendHistoryWhatsApp(bill, btn) {
     const block = parseWhatsAppSendError(err.message);
     if (block) {
       showWhatsAppValidationAlert(block);
+      if (isWhatsAppReconnectError(err.message)) {
+        pendingWhatsAppBillId = bill.id;
+        openWhatsAppConnectModal();
+        startPendingWhatsAppWatcher(bill.id);
+      }
       return;
     }
     showAppAlert({
