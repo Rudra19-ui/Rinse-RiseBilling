@@ -11,18 +11,20 @@ const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const PORT = Number(process.env.WHATSAPP_BRIDGE_PORT || 3001);
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(__dirname, ".wwebjs_auth");
 const CACHE_DIR = process.env.WHATSAPP_CACHE_DIR || path.join(__dirname, ".wwebjs_cache");
-const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || "";
 const IS_HOSTED = Boolean(
   process.env.RAILWAY_ENVIRONMENT || process.env.PUPPETEER_EXECUTABLE_PATH
 );
-const AUTH_READY_TIMEOUT_MS = Number(
-  process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 300000 : 120000)
-);
+
+/**
+ * Pin a known WhatsApp Web HTML (kept under CACHE_DIR). The `ready` event
+ * often never fires on multi-device WA Web — we treat CONNECTED state as ready.
+ */
 const WA_WEB_VERSION =
-  process.env.WHATSAPP_WEB_VERSION || "2.3000.1044824727-alpha";
-const REMOTE_WA_HTML =
-  process.env.WHATSAPP_WEB_HTML_URL ||
-  `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${WA_WEB_VERSION}.html`;
+  process.env.WHATSAPP_WEB_VERSION || "2.3000.1046691727-alpha";
+
+const AUTH_READY_TIMEOUT_MS = Number(
+  process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 360000 : 180000)
+);
 
 const state = {
   ready: false,
@@ -32,6 +34,7 @@ const state = {
   loadingPercent: 0,
   authenticatingSince: null,
   waState: null,
+  sessionLinked: false,
 };
 
 let authTimer = null;
@@ -41,11 +44,35 @@ let recovering = false;
 let sendInProgress = false;
 
 const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
+const SESSION_LINKED_FILE = path.join(AUTH_DIR, ".session-linked");
 let lastReconnectAt = 0;
 
 function ensureAuthDirs() {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   fs.mkdirSync(CACHE_DIR, { recursive: true });
+}
+
+function markSessionLinked() {
+  try {
+    ensureAuthDirs();
+    fs.writeFileSync(SESSION_LINKED_FILE, new Date().toISOString());
+    state.sessionLinked = true;
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSessionLinked() {
+  try {
+    if (fs.existsSync(SESSION_LINKED_FILE)) fs.unlinkSync(SESSION_LINKED_FILE);
+  } catch {
+    /* ignore */
+  }
+  state.sessionLinked = false;
+}
+
+function hasSessionLinked() {
+  return fs.existsSync(SESSION_LINKED_FILE);
 }
 
 function processAlive(pid) {
@@ -82,6 +109,34 @@ function releaseSingleInstanceLock() {
   }
 }
 
+/** Prefer system Chrome/Edge on Windows — more reliable than bundled Chromium for WA Web. */
+function resolveChromePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  const candidates = [
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"),
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
+    process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Microsoft", "Edge", "Application", "msedge.exe"),
+    process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Microsoft", "Edge", "Application", "msedge.exe"),
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
+
+const CHROME_PATH = resolveChromePath();
+
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
@@ -101,11 +156,13 @@ function markReady(source) {
   state.phase = "ready";
   state.ready = true;
   state.authenticatingSince = null;
+  markSessionLinked();
   console.log(`[WhatsApp] Connected and ready (${source}).`);
 }
 
 function startConnectedPoll(waClient) {
   clearConnectPoll();
+  let connectedTicks = 0;
   connectPollTimer = setInterval(async () => {
     if (state.ready || !waClient) {
       clearConnectPoll();
@@ -115,7 +172,14 @@ function startConnectedPoll(waClient) {
       const waState = await waClient.getState();
       state.waState = waState || null;
       if (waState === "CONNECTED") {
-        markReady("state-poll");
+        connectedTicks += 1;
+        // Require CONNECTED twice in a row (~4s) — ready event often never fires
+        // on newer WA Web builds, but state still settles to CONNECTED.
+        if (connectedTicks >= 2) {
+          markReady("state-poll");
+        }
+      } else {
+        connectedTicks = 0;
       }
     } catch (err) {
       console.warn("[WhatsApp] State poll:", err.message);
@@ -125,14 +189,28 @@ function startConnectedPoll(waClient) {
 
 function scheduleAuthTimeout() {
   clearTimeout(authTimer);
-  authTimer = setTimeout(() => {
-    if (!state.ready) {
-      state.phase = "error";
-      state.lastError =
-        "Setup timed out after linking your phone. Click Reset Connection, wait for a new QR, scan again, and keep this window open for up to 5 minutes.";
-      console.error("[WhatsApp] Ready timed out after authentication.");
-      clearConnectPoll();
+  authTimer = setTimeout(async () => {
+    if (state.ready) return;
+
+    // Last chance: if WhatsApp already says CONNECTED, force ready.
+    try {
+      if (client) {
+        const waState = await client.getState();
+        state.waState = waState || null;
+        if (waState === "CONNECTED") {
+          markReady("auth-timeout-connected");
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("[WhatsApp] Auth timeout getState:", err.message);
     }
+
+    state.phase = "error";
+    state.lastError =
+      "Phone linked but WhatsApp Web did not finish loading. Click Reset & Scan Again, wait for a fresh QR, scan quickly, then keep this window open for up to 3 minutes.";
+    console.error("[WhatsApp] Ready timed out after authentication.");
+    clearConnectPoll();
   }, AUTH_READY_TIMEOUT_MS);
 }
 
@@ -179,31 +257,27 @@ function createClient() {
       "--disable-gpu",
       "--no-first-run",
       "--mute-audio",
+      "--disable-extensions",
+      "--disable-background-networking",
     ],
   };
   if (CHROME_PATH) {
     puppeteerConfig.executablePath = CHROME_PATH;
   }
 
+  // Always pin a known-good local WA Web HTML. Remote "latest" often authenticates
+  // but never fires ready (breaks QR linking).
   const clientOptions = {
     authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: "rinse-rise" }),
     puppeteer: puppeteerConfig,
     takeoverOnConflict: true,
     takeoverTimeoutMs: 0,
-  };
-
-  if (IS_HOSTED) {
-    clientOptions.webVersion = WA_WEB_VERSION;
-    clientOptions.webVersionCache = {
-      type: "remote",
-      remotePath: REMOTE_WA_HTML,
-    };
-  } else {
-    clientOptions.webVersionCache = {
+    webVersion: WA_WEB_VERSION,
+    webVersionCache: {
       type: "local",
       path: CACHE_DIR,
-    };
-  }
+    },
+  };
 
   return new Client(clientOptions);
 }
@@ -214,6 +288,7 @@ function bindClientEvents(waClient) {
     state.phase = "qr";
     state.loadingPercent = 0;
     state.lastError = null;
+    state.authenticatingSince = null;
     clearTimeout(authTimer);
     try {
       state.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
@@ -229,7 +304,7 @@ function bindClientEvents(waClient) {
     state.loadingPercent = Number(percent) || 0;
     state.qr = null;
     if (message) console.log(`[WhatsApp] Loading ${percent}% — ${message}`);
-    if (state.loadingPercent >= 95) {
+    if (state.loadingPercent >= 90) {
       startConnectedPoll(waClient);
     }
   });
@@ -240,6 +315,7 @@ function bindClientEvents(waClient) {
     state.lastError = null;
     state.authenticatingSince = Date.now();
     state.loadingPercent = Math.max(state.loadingPercent, 95);
+    markSessionLinked();
     console.log("[WhatsApp] Authenticated — waiting for CONNECTED state…");
     scheduleAuthTimeout();
     startConnectedPoll(waClient);
@@ -272,6 +348,7 @@ function bindClientEvents(waClient) {
     console.warn("[WhatsApp] Disconnected:", reasonText);
 
     if (reasonText === "LOGOUT" || reasonText === "UNPAIRED") {
+      clearSessionLinked();
       state.phase = "error";
       state.lastError = "Logged out from phone. Click Reset Connection and scan QR again.";
       return;
@@ -322,32 +399,6 @@ async function destroyClient() {
   client = null;
 }
 
-async function waitForConnectedState(waClient, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const waState = await waClient.getState();
-      if (waState === "CONNECTED") {
-        await sleep(2000);
-        return true;
-      }
-    } catch (err) {
-      console.warn("[WhatsApp] getState check:", err.message);
-    }
-    await sleep(500);
-  }
-  return false;
-}
-
-async function assertSendReady() {
-  if (!client) throw new Error("WhatsApp not connected.");
-  const waState = await client.getState();
-  if (waState !== "CONNECTED") {
-    state.ready = false;
-    throw new Error(`WhatsApp not fully connected (${waState || "unknown"}).`);
-  }
-}
-
 async function initializeClient() {
   await destroyClient();
   client = createClient();
@@ -357,6 +408,7 @@ async function initializeClient() {
   state.ready = false;
   state.authenticatingSince = null;
   state.waState = null;
+  state.sessionLinked = hasSessionLinked();
   await client.initialize();
 }
 
@@ -402,7 +454,7 @@ async function softRecoverClient(reason) {
     state.phase = "reconnecting";
     await destroyClient();
     await initializeClient();
-    const ok = await waitForReady(60000);
+    const ok = await waitForReady(90000);
     if (!ok && state.phase === "qr") {
       state.lastError = "Scan the QR code in the billing app to reconnect WhatsApp.";
     } else if (!ok) {
@@ -425,8 +477,20 @@ async function resetSession() {
 
   await destroyClient();
 
+  clearSessionLinked();
   fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-  fs.rmSync(CACHE_DIR, { recursive: true, force: true });
+  // Keep pinned HTML in cache; only wipe other cached versions
+  if (fs.existsSync(CACHE_DIR)) {
+    for (const name of fs.readdirSync(CACHE_DIR)) {
+      if (!name.includes(WA_WEB_VERSION)) {
+        try {
+          fs.rmSync(path.join(CACHE_DIR, name), { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   fs.mkdirSync(CACHE_DIR, { recursive: true });
 
@@ -502,6 +566,15 @@ async function resolveSendTargets(digits) {
   return ordered;
 }
 
+async function assertSendReady() {
+  if (!client) throw new Error("WhatsApp not connected.");
+  const waState = await client.getState();
+  if (waState !== "CONNECTED") {
+    state.ready = false;
+    throw new Error(`WhatsApp not fully connected (${waState || "unknown"}).`);
+  }
+}
+
 async function performSend(digits, message, filePath, filename) {
   await assertSendReady();
 
@@ -556,6 +629,7 @@ app.get("/status", (_req, res) => {
     recovering,
     waState: state.waState,
     authenticatingSeconds: authSeconds,
+    sessionLinked: state.sessionLinked || hasSessionLinked(),
     hosted: IS_HOSTED,
   });
 });
@@ -638,7 +712,7 @@ app.post("/send", async (req, res) => {
   }
 });
 
-app.listen(PORT, "127.0.0.1", () => {
+const server = app.listen(PORT, "127.0.0.1", () => {
   acquireSingleInstanceLock();
   process.on("SIGINT", () => {
     releaseSingleInstanceLock();
@@ -651,14 +725,26 @@ app.listen(PORT, "127.0.0.1", () => {
   process.on("exit", releaseSingleInstanceLock);
 
   ensureAuthDirs();
+  state.sessionLinked = hasSessionLinked();
   console.log(`[WhatsApp] Bridge running on http://127.0.0.1:${PORT}`);
   console.log(`[WhatsApp] Session data: ${AUTH_DIR}`);
+  console.log(`[WhatsApp] WA Web version: ${WA_WEB_VERSION}`);
   if (CHROME_PATH) {
-    console.log(`[WhatsApp] Using Chromium at ${CHROME_PATH}`);
+    console.log(`[WhatsApp] Using browser: ${CHROME_PATH}`);
+  } else {
+    console.warn("[WhatsApp] No system Chrome/Edge found — using Puppeteer Chromium.");
   }
   initializeClient().catch((err) => {
     state.phase = "error";
     state.lastError = err.message;
     console.error("[WhatsApp] Init failed:", err.message);
   });
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`[WhatsApp] Port ${PORT} is already in use. Close the other WhatsApp Scanner window, or run Reset WhatsApp.bat`);
+    process.exit(1);
+  }
+  throw err;
 });

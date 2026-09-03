@@ -17,9 +17,17 @@ if %ERRORLEVEL%==0 (
     call npm install
     cd ..
   )
+
+  REM Stop any stale scanner so we don't get EADDRINUSE / stuck sessions
+  for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do (
+    echo Stopping old WhatsApp scanner ^(PID %%a^)...
+    taskkill /F /PID %%a >nul 2>&1
+  )
+  timeout /t 1 /nobreak >nul
+
   echo Starting WhatsApp scanner service...
   start "WhatsApp Scanner" /MIN cmd /c "cd /d "%~dp0whatsapp-bridge" && node server.js >> bridge.log 2>&1"
-  timeout /t 2 /nobreak >nul
+  timeout /t 3 /nobreak >nul
 ) else (
   echo NOTE: Install Node.js from https://nodejs.org for automatic PDF sending on WhatsApp.
   echo.
@@ -30,6 +38,7 @@ echo Database: data\rinse_rise.db
 echo Browser:  http://localhost:8080
 echo.
 echo WhatsApp PDF: Click the WhatsApp pill in the header and scan QR once.
+echo If QR won't link: run "Reset WhatsApp.bat" then scan again.
 echo Press Ctrl+C to stop
 echo.
 
