@@ -1014,6 +1014,19 @@ function normalizeQty(item, value) {
   return qty;
 }
 
+function isPartialQtyInput(value) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed === "" || trimmed === "." || trimmed === "-" || /\.$/.test(trimmed);
+}
+
+function formatQtyInputValue(item, qty) {
+  const n = Number(qty);
+  if (isKgItem(item)) {
+    return n % 1 === 0 ? String(n) : n.toFixed(1);
+  }
+  return String(Math.round(n));
+}
+
 function formatQtyDisplay(item) {
   const qty = Number(item.qty) || 0;
   if (isKgItem(item)) {
@@ -1043,13 +1056,11 @@ function enrichBillItem(item) {
 function renderQtyCellHtml(item) {
   if (isKgItem(item)) {
     const qty = Number(item.qty) || 1;
-    const val = qty % 1 === 0 ? qty : qty.toFixed(1);
-    const min = getMinQty(item);
-    const step = getQtyStep(item);
+    const val = formatQtyInputValue(item, qty);
     return `
       <div class="qty-control qty-control-kg">
         <button type="button" data-action="minus" data-key="${item.key}">−</button>
-        <input type="number" class="qty-input" data-key="${item.key}" value="${val}" min="${min}" step="${step}" aria-label="Kilograms">
+        <input type="text" inputmode="decimal" class="qty-input" data-key="${item.key}" value="${val}" aria-label="Kilograms">
         <span class="qty-unit">kg</span>
         <button type="button" data-action="plus" data-key="${item.key}">+</button>
       </div>
@@ -1234,6 +1245,7 @@ function updateQty(key, delta) {
 function setItemQty(key, value) {
   const item = billItems.find((b) => b.key === key);
   if (!item) return;
+  if (isPartialQtyInput(value)) return;
   item.qty = normalizeQty(item, value);
   if (item.qty <= 0) {
     removeItem(key);
@@ -1242,6 +1254,29 @@ function setItemQty(key, value) {
     updateTotals();
     updateActionButtons();
   }
+}
+
+function commitBillItemQty(key, rawValue, inputEl) {
+  const item = billItems.find((b) => b.key === key);
+  if (!item) return;
+  if (isPartialQtyInput(rawValue)) {
+    if (inputEl) inputEl.value = formatQtyInputValue(item, item.qty);
+    return;
+  }
+  setItemQty(key, rawValue);
+  if (inputEl && billItems.some((b) => b.key === key)) {
+    inputEl.value = formatQtyInputValue(item, item.qty);
+  }
+}
+
+function previewBillItemQty(key, rawValue) {
+  const item = billItems.find((b) => b.key === key);
+  if (!item || isPartialQtyInput(rawValue)) return;
+  const parsed = parseFloat(rawValue);
+  if (Number.isNaN(parsed)) return;
+  const row = els.billItems.querySelector(`tr[data-key="${key}"]`);
+  const amountCell = row?.querySelector(".line-amount strong");
+  if (amountCell) amountCell.textContent = formatCurrency(item.rate * parsed);
 }
 
 function updateRate(key, newRate) {
@@ -1268,9 +1303,8 @@ function updateRowAmount(key) {
   if (!row) return;
 
   const qtyInput = row.querySelector(".qty-input");
-  if (qtyInput) {
-    const qty = Number(item.qty);
-    qtyInput.value = qty % 1 === 0 ? qty : qty.toFixed(1);
+  if (qtyInput && document.activeElement !== qtyInput) {
+    qtyInput.value = formatQtyInputValue(item, item.qty);
   }
 
   const qtySpan = row.querySelector(".qty-value");
@@ -4186,17 +4220,32 @@ function bindHistoryEditEvents() {
   els.historyDetail.querySelectorAll(".history-edit-qty").forEach((input) => {
     input.addEventListener("input", () => {
       const item = draft.items.find((b) => b.key === input.dataset.key);
+      if (!item || isPartialQtyInput(input.value)) return;
+      const parsed = parseFloat(input.value);
+      if (Number.isNaN(parsed)) return;
+      const row = input.closest("tr");
+      const amountCell = row?.querySelector("[data-line-amount]");
+      if (amountCell) amountCell.textContent = formatCurrency(item.rate * parsed);
+    });
+    input.addEventListener("blur", () => {
+      const item = draft.items.find((b) => b.key === input.dataset.key);
       if (!item) return;
+      if (isPartialQtyInput(input.value)) {
+        input.value = formatQtyInputValue(item, item.qty);
+        return;
+      }
       item.qty = normalizeQty(item, input.value);
-      input.value = isKgItem(item)
-        ? item.qty % 1 === 0
-          ? item.qty
-          : item.qty.toFixed(1)
-        : item.qty;
+      input.value = formatQtyInputValue(item, item.qty);
       refreshHistoryEditSummary();
       const row = input.closest("tr");
       const amountCell = row?.querySelector("[data-line-amount]");
       if (amountCell) amountCell.textContent = formatCurrency(item.rate * item.qty);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        input.blur();
+      }
     });
   });
 
@@ -4324,7 +4373,7 @@ function renderHistoryDetailEdit(bill) {
           <td>${item.service}</td>
           <td>
             <div class="qty-edit-wrap">
-              <input type="number" class="history-edit-input history-edit-qty" data-key="${item.key}" value="${item.qty}" min="${getMinQty(item)}" step="${getQtyStep(item)}">
+              <input type="text" inputmode="decimal" class="history-edit-input history-edit-qty" data-key="${item.key}" value="${isKgItem(item) ? formatQtyInputValue(item, item.qty) : item.qty}">
               <span class="qty-unit">${isKgItem(item) ? "kg" : "pc"}</span>
             </div>
           </td>
@@ -4817,12 +4866,13 @@ function renderBill() {
   });
 
   tbody.querySelectorAll(".qty-input").forEach((input) => {
-    input.addEventListener("change", () => setItemQty(input.dataset.key, input.value));
-    input.addEventListener("blur", () => {
-      const item = billItems.find((b) => b.key === input.dataset.key);
-      if (!item) return;
-      const qty = Number(item.qty);
-      input.value = qty % 1 === 0 ? qty : qty.toFixed(1);
+    input.addEventListener("input", () => previewBillItemQty(input.dataset.key, input.value));
+    input.addEventListener("blur", () => commitBillItemQty(input.dataset.key, input.value, input));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        input.blur();
+      }
     });
   });
 
