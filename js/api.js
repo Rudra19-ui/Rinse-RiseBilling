@@ -180,6 +180,17 @@ const API = {
     return this.request("/api/offers");
   },
 
+  getRates() {
+    return this.request("/api/rates");
+  },
+
+  saveRates(rates, password) {
+    return this.request("/api/rates", {
+      method: "PUT",
+      body: JSON.stringify({ ...rates, password }),
+    });
+  },
+
   saveOffers(offers, password) {
     return this.request("/api/offers", {
       method: "PUT",
@@ -206,10 +217,10 @@ const API = {
     });
   },
 
-  sendBillWhatsApp(billId) {
+  sendBillWhatsApp(billId, { skipPaymentValidation = false } = {}) {
     return this.request(`/api/bills/${billId}/send-whatsapp`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ skipPaymentValidation }),
     });
   },
 

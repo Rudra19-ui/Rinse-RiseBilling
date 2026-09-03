@@ -44,6 +44,7 @@ from database import (
 )
 from invoice_pdf import build_whatsapp_message, generate_invoice_pdf, invoice_filename
 from offers import get_offers, save_offers
+from rates import get_rates, save_rates
 from whatsapp_send import (
     bridge_is_running,
     get_bridge_status,
@@ -328,10 +329,13 @@ def api_send_bill_whatsapp(bill_id: int):
         return jsonify({"error": "Bill not found"}), 404
     if not bill.get("customerPhone"):
         return jsonify({"error": "Customer phone number is required."}), 400
-    if not (bill.get("paymentType") or "").strip():
-        return jsonify({"error": "Payment Type is required before sending on WhatsApp."}), 400
-    if not (bill.get("paymentInfo") or "").strip():
-        return jsonify({"error": "Payment Info is required before sending on WhatsApp."}), 400
+    payload = request.get_json(silent=True) or {}
+    skip_payment = bool(payload.get("skipPaymentValidation"))
+    if not skip_payment:
+        if not (bill.get("paymentType") or "").strip():
+            return jsonify({"error": "Payment Type is required before sending on WhatsApp."}), 400
+        if not (bill.get("paymentInfo") or "").strip():
+            return jsonify({"error": "Payment Info is required before sending on WhatsApp."}), 400
     if (bill.get("deliveryStatus") or "").strip() != "done" and (bill.get("sentVia") or "").strip() != "whatsapp":
         return jsonify({"error": "Order must be marked Delivery Done before sending on WhatsApp."}), 400
     try:
@@ -369,6 +373,29 @@ def api_migrate():
     data = request.get_json(force=True, silent=True) or {}
     result = migrate_from_local(data)
     return jsonify(result)
+
+
+@app.route("/api/rates", methods=["GET"])
+def api_get_rates():
+    try:
+        return jsonify(get_rates())
+    except (ValueError, FileNotFoundError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/rates", methods=["PUT"])
+def api_save_rates():
+    data = request.get_json(force=True, silent=True) or {}
+    password = (data.get("password") or request.headers.get("X-Rates-Password") or "").strip()
+    expected = os.environ.get("OFFERS_EDIT_PASSWORD", os.environ.get("CLEAR_DATA_PASSWORD", "NihkilDada@22")).strip()
+    if not password or password != expected:
+        return jsonify({"error": "Invalid password"}), 403
+    payload = {k: v for k, v in data.items() if k != "password"}
+    try:
+        rates = save_rates(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(rates)
 
 
 @app.route("/api/offers", methods=["GET"])

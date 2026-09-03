@@ -33,6 +33,10 @@
             <span class="bill-badge" id="billNo">Bill #0001</span>
             <span id="billDate"></span>
           </div>
+          <button type="button" class="btn btn-history" id="rateCardBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="19" cy="17" r="3"/></svg>
+            Service Rates
+          </button>
           <button type="button" class="btn btn-history" id="expenditureBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             Expenditure
@@ -437,6 +441,23 @@
         </section>
       </div>
     </div>
+
+    <!-- Service Rates View -->
+    <div id="rateCardView" class="rate-card-view hidden">
+      <div class="rate-card-toolbar">
+        <div class="rate-card-toolbar-left">
+          <button type="button" class="btn btn-outline" id="backFromRateCardBtn">← Back to Billing</button>
+          <h2>Service Rates</h2>
+        </div>
+        <div class="rate-card-toolbar-right">
+          <input type="search" id="rateCardSearch" class="rate-card-search" placeholder="Search item or service…" autocomplete="off">
+          <button type="button" class="btn btn-primary" id="saveRateCardBtn">Save Rates</button>
+        </div>
+      </div>
+      <div id="rateCardBody" class="rate-card-body">
+        <p class="rate-card-loading">Loading service rates…</p>
+      </div>
+    </div>
   </div>
 
   <!-- Customer Stats Modal -->
@@ -492,6 +513,7 @@
       <h3 id="appAlertTitle" class="app-alert-title">Notice</h3>
       <div id="appAlertBody" class="app-alert-body"></div>
       <div class="app-alert-actions">
+        <button type="button" class="btn btn-outline hidden" id="appAlertSecondaryBtn">Still send bill to customer</button>
         <button type="button" class="btn btn-primary" id="appAlertOkBtn">OK</button>
       </div>
     </div>

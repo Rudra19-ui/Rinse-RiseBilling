@@ -71,6 +71,12 @@ const els = {
   historyPeriodSummary: $("#historyPeriodSummary"),
   downloadHistoryExcelBtn: $("#downloadHistoryExcelBtn"),
   expenditureBtn: $("#expenditureBtn"),
+  rateCardBtn: $("#rateCardBtn"),
+  rateCardView: $("#rateCardView"),
+  rateCardBody: $("#rateCardBody"),
+  rateCardSearch: $("#rateCardSearch"),
+  saveRateCardBtn: $("#saveRateCardBtn"),
+  backFromRateCardBtn: $("#backFromRateCardBtn"),
   expenditureView: $("#expenditureView"),
   backFromExpenditureBtn: $("#backFromExpenditureBtn"),
   expenditureForm: $("#expenditureForm"),
@@ -116,6 +122,8 @@ const els = {
 
 const EXPENDITURE_PASSWORD = "NihkilDada@22";
 let passwordGateTarget = null;
+let ratesEditDraft = null;
+let rateCardSearchQuery = "";
 let offersCache = [];
 let offersEditUnlocked = false;
 let offersEditingId = null;
@@ -599,10 +607,15 @@ function validateCustomerRequired() {
   return true;
 }
 
-function validatePaymentRequired(paymentType, paymentInfo, { fromHistory = false } = {}) {
+function getWhatsAppPaymentMissing(paymentType, paymentInfo) {
   const missing = [];
   if (!(paymentType || "").trim()) missing.push("paymentType");
   if (!(paymentInfo || "").trim()) missing.push("paymentInfo");
+  return missing;
+}
+
+function validatePaymentRequired(paymentType, paymentInfo, { fromHistory = false } = {}) {
+  const missing = getWhatsAppPaymentMissing(paymentType, paymentInfo);
   if (!missing.length) return true;
 
   showWhatsAppValidationAlert(getWhatsAppPaymentBlockMessage(missing));
@@ -610,6 +623,25 @@ function validatePaymentRequired(paymentType, paymentInfo, { fromHistory = false
     document.querySelector(".payment-section")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   return false;
+}
+
+function confirmPaymentForWhatsApp(bill) {
+  const missing = getWhatsAppPaymentMissing(bill.paymentType, bill.paymentInfo);
+  if (!missing.length) return Promise.resolve(true);
+
+  const block = getWhatsAppPaymentBlockMessage(missing);
+  return new Promise((resolve) => {
+    showAppAlert({
+      title: block.title,
+      html: block.html,
+      variant: "warning",
+      secondaryAction: {
+        label: "Still send bill to customer",
+        onClick: () => resolve(true),
+      },
+      onDismiss: () => resolve(false),
+    });
+  });
 }
 
 function validateOrderDoneForWhatsApp(deliveryStatus, { resend = false } = {}) {
@@ -688,15 +720,26 @@ function isWhatsAppReconnectError(message) {
   );
 }
 
+let appAlertSecondaryHandler = null;
+let appAlertDismissHandler = null;
+
 function showWhatsAppValidationAlert(block) {
   showAppAlert({ title: block.title, html: block.html, variant: "warning" });
 }
 
-function showAppAlert({ title = "Notice", message = "", html = "", variant = "info" } = {}) {
+function showAppAlert({
+  title = "Notice",
+  message = "",
+  html = "",
+  variant = "info",
+  secondaryAction = null,
+  onDismiss = null,
+} = {}) {
   const modal = $("#appAlertModal");
   const content = modal?.querySelector(".app-alert-content");
   const titleEl = $("#appAlertTitle");
   const bodyEl = $("#appAlertBody");
+  const secondaryBtn = $("#appAlertSecondaryBtn");
   if (!modal || !content || !titleEl || !bodyEl) {
     alert(message || title);
     return;
@@ -708,16 +751,37 @@ function showAppAlert({ title = "Notice", message = "", html = "", variant = "in
   } else {
     bodyEl.textContent = message;
   }
+  appAlertDismissHandler = onDismiss || null;
+  appAlertSecondaryHandler = secondaryAction
+    ? () => secondaryAction.onClick?.()
+    : null;
+  if (secondaryAction && secondaryBtn) {
+    secondaryBtn.textContent = secondaryAction.label || "Still send to customer";
+    secondaryBtn.classList.remove("hidden");
+  } else {
+    secondaryBtn?.classList.add("hidden");
+  }
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
   $("#appAlertOkBtn")?.focus();
 }
 
-function closeAppAlert() {
+function closeAppAlert({ notifyDismiss = true } = {}) {
   const modal = $("#appAlertModal");
   if (!modal) return;
   modal.classList.add("hidden");
   modal.setAttribute("aria-hidden", "true");
+  $("#appAlertSecondaryBtn")?.classList.add("hidden");
+  const dismiss = appAlertDismissHandler;
+  appAlertDismissHandler = null;
+  appAlertSecondaryHandler = null;
+  if (notifyDismiss) dismiss?.();
+}
+
+function handleAppAlertSecondary() {
+  const handler = appAlertSecondaryHandler;
+  closeAppAlert({ notifyDismiss: false });
+  handler?.();
 }
 
 function updateDeliveryDisplay() {
@@ -2474,14 +2538,14 @@ function showWhatsAppToast(html, durationMs = 7000) {
   showWhatsAppToast._timer = setTimeout(() => toast.classList.add("hidden"), durationMs);
 }
 
-async function shareBillOnWhatsApp(phone, bill) {
+async function shareBillOnWhatsApp(phone, bill, { skipPaymentValidation = false } = {}) {
   if (!bill?.id) {
     throw new Error("Bill must be saved before sending on WhatsApp.");
   }
 
   let result;
   try {
-    result = await API.sendBillWhatsApp(bill.id);
+    result = await API.sendBillWhatsApp(bill.id, { skipPaymentValidation });
   } catch (err) {
     throw new Error(err.message || "Could not reach WhatsApp service.");
   }
@@ -2918,6 +2982,7 @@ function hideSecondaryViews() {
   els.billingView.classList.add("hidden");
   els.historyView.classList.add("hidden");
   els.expenditureView.classList.add("hidden");
+  els.rateCardView?.classList.add("hidden");
 }
 
 function showBillingView() {
@@ -3026,10 +3091,12 @@ function openExpenditurePasswordModal(target = "expenditure") {
   if (!els.expenditurePasswordModal) return;
   passwordGateTarget = target;
   if (els.expenditurePasswordSubtitle) {
-    els.expenditurePasswordSubtitle.textContent =
-      target === "overallStats"
-        ? "Required to open Over All Statistics"
-        : "Required to open Shop Expenditure";
+    const subtitles = {
+      expenditure: "Required to open Shop Expenditure",
+      overallStats: "Required to open Over All Statistics",
+      rateCard: "Required to open Service Rates",
+    };
+    els.expenditurePasswordSubtitle.textContent = subtitles[target] || subtitles.expenditure;
   }
   els.expenditurePasswordError?.classList.add("hidden");
   els.expenditurePasswordForm?.reset();
@@ -3060,6 +3127,8 @@ function handleExpenditurePasswordSubmit(e) {
     closeExpenditurePasswordModal();
     if (target === "overallStats") {
       await loadAndShowOverallStatsReport();
+    } else if (target === "rateCard") {
+      await showRateCardView();
     } else {
       await showExpenditureView();
     }
@@ -3074,6 +3143,174 @@ function requestExpenditureAccess() {
 function requestOverallStatsAccess() {
   if (els.overallStatsModal && !els.overallStatsModal.classList.contains("hidden")) return;
   openExpenditurePasswordModal("overallStats");
+}
+
+function requestOverallStatsAccess() {
+  if (els.overallStatsModal && !els.overallStatsModal.classList.contains("hidden")) return;
+  openExpenditurePasswordModal("overallStats");
+}
+
+function requestRateCardAccess() {
+  if (els.rateCardView && !els.rateCardView.classList.contains("hidden")) return;
+  openExpenditurePasswordModal("rateCard");
+}
+
+function cloneRatesData(data) {
+  return JSON.parse(JSON.stringify(data || { businessName: "", services: [] }));
+}
+
+async function loadRatesData() {
+  try {
+    ratesData = await API.getRates();
+    return ratesData;
+  } catch {
+    const res = await fetch("data/rates.json");
+    if (!res.ok) throw new Error("Could not load rate card.");
+    ratesData = await res.json();
+    return ratesData;
+  }
+}
+
+function updateRateDraft(serviceId, categoryName, itemName, rate) {
+  if (!ratesEditDraft) return;
+  const service = ratesEditDraft.services.find((s) => s.id === serviceId);
+  const category = service?.categories.find((c) => c.name === categoryName);
+  const item = category?.items.find((i) => i.name === itemName);
+  if (item) item.rate = rate;
+}
+
+function renderRateCardView() {
+  if (!els.rateCardBody || !ratesEditDraft) return;
+  const q = rateCardSearchQuery.trim().toLowerCase();
+  const services = ratesEditDraft.services || [];
+  if (!services.length) {
+    els.rateCardBody.innerHTML = '<p class="rate-card-empty">No services found in the rate card.</p>';
+    return;
+  }
+
+  const sections = services
+    .map((service) => {
+      const categories = (service.categories || [])
+        .map((category) => {
+          const items = (category.items || []).filter((item) => {
+            if (!q) return true;
+            const haystack = `${service.name} ${category.name} ${item.name}`.toLowerCase();
+            return haystack.includes(q);
+          });
+          if (!items.length) return "";
+          const rows = items
+            .map((item) => {
+              const key = `${service.id}|${category.name}|${item.name}`;
+              return `
+                <tr>
+                  <td>${escapeHtml(item.name)}</td>
+                  <td class="rate-card-rate-cell">
+                    <span class="rate-card-currency">₹</span>
+                    <input
+                      type="number"
+                      class="rate-card-input"
+                      min="0"
+                      step="1"
+                      value="${Number(item.rate) || 0}"
+                      data-service-id="${escapeAttr(service.id)}"
+                      data-category="${escapeAttr(category.name)}"
+                      data-item="${escapeAttr(item.name)}"
+                      data-key="${escapeAttr(key)}"
+                    >
+                  </td>
+                </tr>
+              `;
+            })
+            .join("");
+          return `
+            <div class="rate-card-category">
+              <h4>${escapeHtml(category.name)}</h4>
+              <table class="rate-card-table">
+                <thead>
+                  <tr><th>Item</th><th>Rate</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          `;
+        })
+        .filter(Boolean)
+        .join("");
+
+      if (!categories) return "";
+      return `
+        <section class="rate-card-service panel">
+          <div class="panel-head">
+            <span class="panel-icon">🧺</span>
+            <h3>${escapeHtml(service.name)}</h3>
+          </div>
+          <div class="rate-card-categories">${categories}</div>
+        </section>
+      `;
+    })
+    .filter(Boolean)
+    .join("");
+
+  els.rateCardBody.innerHTML = sections
+    ? sections
+    : `<p class="rate-card-empty">No items match “${escapeHtml(rateCardSearchQuery)}”.</p>`;
+
+  els.rateCardBody.querySelectorAll(".rate-card-input").forEach((input) => {
+    input.addEventListener("change", handleRateCardInput);
+    input.addEventListener("blur", handleRateCardInput);
+  });
+}
+
+function handleRateCardInput(e) {
+  const input = e.currentTarget;
+  const rate = parseFloat(input.value);
+  if (Number.isNaN(rate) || rate < 0) {
+    input.value = "0";
+    updateRateDraft(input.dataset.serviceId, input.dataset.category, input.dataset.item, 0);
+    return;
+  }
+  const rounded = Math.round(rate * 100) / 100;
+  input.value = String(rounded);
+  updateRateDraft(input.dataset.serviceId, input.dataset.category, input.dataset.item, rounded);
+}
+
+async function showRateCardView() {
+  hideSecondaryViews();
+  els.rateCardView?.classList.remove("hidden");
+  rateCardSearchQuery = "";
+  if (els.rateCardSearch) els.rateCardSearch.value = "";
+  ratesEditDraft = cloneRatesData(ratesData);
+  renderRateCardView();
+}
+
+async function saveRateCard() {
+  if (!ratesEditDraft) return;
+  try {
+    await withButtonLoading(els.saveRateCardBtn, async () => {
+      setSectionLoading(els.rateCardView, true, "Saving rates…");
+      try {
+        const saved = await API.saveRates(ratesEditDraft, EXPENDITURE_PASSWORD);
+        ratesData = saved;
+        ratesEditDraft = cloneRatesData(saved);
+        populateServices();
+        onServiceChange(false);
+        renderRateCardView();
+        showAppAlert({
+          title: "Rates saved",
+          message: "Service rates are updated. New bills will use the new prices.",
+          variant: "info",
+        });
+      } finally {
+        setSectionLoading(els.rateCardView, false);
+      }
+    }, "Saving…");
+  } catch (err) {
+    showAppAlert({
+      title: "Could not save rates",
+      message: err.message || "Something went wrong. Please try again.",
+      variant: "error",
+    });
+  }
 }
 
 function showExpenditureView() {
@@ -4420,7 +4657,7 @@ function printHistoryBill(bill, btn) {
   }, "Printing…").then(() => window.print());
 }
 
-async function sendHistoryWhatsApp(bill, btn) {
+async function sendHistoryWhatsApp(bill, btn, { skipPaymentValidation = false } = {}) {
   const phone = formatPhoneForWhatsApp(bill.customerPhone);
   if (phone.length < 12) {
     showAppAlert({
@@ -4430,8 +4667,10 @@ async function sendHistoryWhatsApp(bill, btn) {
     });
     return;
   }
-  if (!validatePaymentRequired(bill.paymentType, bill.paymentInfo, { fromHistory: true })) {
-    return;
+  if (!skipPaymentValidation) {
+    const paymentOk = await confirmPaymentForWhatsApp(bill);
+    if (!paymentOk) return;
+    skipPaymentValidation = getWhatsAppPaymentMissing(bill.paymentType, bill.paymentInfo).length > 0;
   }
   if (!validateOrderDoneForWhatsApp(bill.deliveryStatus, { resend: billWasSentOnWhatsApp(bill) })) {
     return;
@@ -4440,7 +4679,7 @@ async function sendHistoryWhatsApp(bill, btn) {
     await withButtonLoading(btn, async () => {
       setSectionLoading(els.historyView, true, "Sending on WhatsApp…");
       try {
-        await shareBillOnWhatsApp(phone, bill);
+        await shareBillOnWhatsApp(phone, bill, { skipPaymentValidation });
         await refreshBillHistory({ silent: true });
         const updated = billHistoryCache.find((b) => b.id === bill.id);
         if (updated) {
@@ -4454,6 +4693,13 @@ async function sendHistoryWhatsApp(bill, btn) {
     }, "Sending…");
   } catch (err) {
     const block = parseWhatsAppSendError(err.message);
+    if (block && /payment type|payment info/i.test(err.message || "")) {
+      const paymentOk = await confirmPaymentForWhatsApp(bill);
+      if (paymentOk) {
+        await sendHistoryWhatsApp(bill, btn, { skipPaymentValidation: true });
+      }
+      return;
+    }
     if (block) {
       showWhatsAppValidationAlert(block);
       if (isWhatsAppReconnectError(err.message)) {
@@ -4701,8 +4947,7 @@ async function init() {
   }
 
   try {
-    const res = await fetch("data/rates.json");
-    ratesData = await res.json();
+    await loadRatesData();
   } catch {
     alert("Could not load rate card.");
     return;
@@ -4782,6 +5027,13 @@ async function init() {
   els.closeOverallStats.addEventListener("click", hideOverallStatsReport);
   els.overallStatsBackdrop.addEventListener("click", hideOverallStatsReport);
   els.expenditureBtn.addEventListener("click", requestExpenditureAccess);
+  els.rateCardBtn?.addEventListener("click", requestRateCardAccess);
+  els.backFromRateCardBtn?.addEventListener("click", showBillingView);
+  els.saveRateCardBtn?.addEventListener("click", saveRateCard);
+  els.rateCardSearch?.addEventListener("input", (e) => {
+    rateCardSearchQuery = e.target.value;
+    renderRateCardView();
+  });
   els.expenditurePasswordForm?.addEventListener("submit", handleExpenditurePasswordSubmit);
   els.closeExpenditurePassword?.addEventListener("click", closeExpenditurePasswordModal);
   els.cancelExpenditurePassword?.addEventListener("click", closeExpenditurePasswordModal);
@@ -4797,8 +5049,9 @@ async function init() {
   els.whatsappStatusPill?.addEventListener("click", () => openWhatsAppConnectModal());
   els.closeWhatsAppConnect?.addEventListener("click", closeWhatsAppConnectModal);
   els.whatsappConnectBackdrop?.addEventListener("click", closeWhatsAppConnectModal);
-  $("#appAlertOkBtn")?.addEventListener("click", closeAppAlert);
-  $("#appAlertBackdrop")?.addEventListener("click", closeAppAlert);
+  $("#appAlertOkBtn")?.addEventListener("click", () => closeAppAlert());
+  $("#appAlertSecondaryBtn")?.addEventListener("click", handleAppAlertSecondary);
+  $("#appAlertBackdrop")?.addEventListener("click", () => closeAppAlert());
   els.offersBtn?.addEventListener("click", openOffersModal);
   els.offersManageBtn?.addEventListener("click", requestOffersManageAccess);
   els.offersDoneManageBtn?.addEventListener("click", exitOffersManageMode);
