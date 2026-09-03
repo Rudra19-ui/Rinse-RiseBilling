@@ -597,6 +597,32 @@ function validateCustomerRequired() {
   return true;
 }
 
+function validatePaymentRequired(paymentType, paymentInfo, { fromHistory = false } = {}) {
+  const missing = [];
+  if (!paymentType) missing.push("Payment Type");
+  if (!paymentInfo) missing.push("Payment Info");
+  if (!missing.length) return true;
+
+  const fields = missing.join(" and ");
+  const hint = fromHistory
+    ? "\n\nClick Edit Order, select both fields, save, then try Send on WhatsApp again."
+    : "\n\nSelect Cash or UPI Online under Payment Type, and Pre Payment or Post Payment under Payment Info.";
+  alert(`Please select ${fields} before sending on WhatsApp.${hint}`);
+  if (!fromHistory) {
+    document.querySelector(".payment-section")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  return false;
+}
+
+function validateOrderDoneForWhatsApp(deliveryStatus) {
+  if (deliveryStatus === "done") return true;
+  alert(
+    "WhatsApp bill can only be sent after delivery is complete.\n\n" +
+      "Mark the order as Delivery Done first, then use Send on WhatsApp."
+  );
+  return false;
+}
+
 function updateDeliveryDisplay() {
   if (els.deliveryDisplay) {
     els.deliveryDisplay.textContent = formatDeliveryDateTime();
@@ -4167,7 +4193,7 @@ function renderHistoryDetail(bill) {
       ${orderReadyBtn}
       ${statusBtn}
       <button type="button" class="btn btn-primary" data-action="reprint" data-id="${bill.id}">Print Again</button>
-      ${bill.customerPhone ? `<button type="button" class="btn btn-whatsapp" data-action="resend" data-id="${bill.id}">Send on WhatsApp</button>` : ""}
+      ${status === "done" && bill.customerPhone ? `<button type="button" class="btn btn-whatsapp" data-action="resend" data-id="${bill.id}">Send on WhatsApp</button>` : ""}
     </div>
   `;
 
@@ -4270,6 +4296,12 @@ async function sendHistoryWhatsApp(bill, btn) {
   const phone = formatPhoneForWhatsApp(bill.customerPhone);
   if (phone.length < 12) {
     alert("This bill has no valid phone number.");
+    return;
+  }
+  if (!validatePaymentRequired(bill.paymentType, bill.paymentInfo, { fromHistory: true })) {
+    return;
+  }
+  if (!validateOrderDoneForWhatsApp(bill.deliveryStatus)) {
     return;
   }
   try {
@@ -4464,45 +4496,10 @@ function buildReceipt() {
 }
 
 async function sendWhatsApp() {
-  if (billItems.length === 0) return;
-  if (!validateCustomerRequired()) return;
-
-  const phone = formatPhoneForWhatsApp(els.customerPhone.value.trim());
-  if (phone.length < 12) {
-    alert("Please enter a valid 10-digit customer phone number.");
-    els.customerPhone.focus();
-    return;
-  }
-
-  try {
-    await withButtonLoading(els.whatsappBtn, async () => {
-      setSectionLoading(els.billingView, true, "Sending on WhatsApp…");
-      try {
-        const saved = await saveBillToDatabase("whatsapp", { refreshHistory: false });
-        if (!saved) return;
-        await shareBillOnWhatsApp(phone, saved);
-        await refreshBillHistory({ silent: true });
-        resetBillForm();
-      } finally {
-        setSectionLoading(els.billingView, false);
-      }
-    }, "Sending…");
-  } catch (err) {
-    const message = err.message || "Unknown error";
-    if (isHostedDeployment() && /postgresql|railway|database/i.test(message)) {
-      alert(
-        "Could not save bill — database not connected on Railway.\n\n" +
-          "Fix:\n" +
-          "1. Railway → Rinse-RiseBilling → Variables\n" +
-          "2. Delete old DATABASE_URL\n" +
-          "3. Add Variable Reference: Postgres → DATABASE_PRIVATE_URL → name DATABASE_URL\n" +
-          "4. Redeploy\n\n" +
-          "Then try Send on WhatsApp again."
-      );
-    } else {
-      alert("Could not send on WhatsApp: " + message);
-    }
-  }
+  alert(
+    "WhatsApp bill can only be sent after delivery is complete.\n\n" +
+      "Save the bill, open History, mark Delivery Done, then use Send on WhatsApp."
+  );
 }
 
 async function printReceipt() {
