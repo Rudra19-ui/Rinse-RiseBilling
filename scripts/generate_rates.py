@@ -68,6 +68,32 @@ def parse_simple(df):
     return items
 
 
+def parse_laundry_categories(df):
+    """Each laundry line becomes its own category (Wash & Fold, Wash & Iron)."""
+    categories = []
+    for item in parse_simple(df):
+        raw = item["name"].lower()
+        if "fold" in raw:
+            label = "Wash & Fold"
+        elif "iron" in raw or "steam" in raw:
+            label = "Wash & Iron"
+        else:
+            label = item["name"]
+        categories.append(
+            {
+                "name": label,
+                "items": [
+                    {
+                        "name": f"{label} (per kg)",
+                        "rate": item["rate"],
+                        "unit": "kg",
+                    }
+                ],
+            }
+        )
+    return categories
+
+
 services = []
 
 df = sheets["Steam Iron "]
@@ -80,8 +106,8 @@ df = sheets["Laundry"]
 services.append(
     {
         "id": "laundry",
-        "name": "Lundry",
-        "categories": [{"name": "Laundry Service", "items": parse_simple(df)}],
+        "name": "Laundry",
+        "categories": parse_laundry_categories(df),
     }
 )
 

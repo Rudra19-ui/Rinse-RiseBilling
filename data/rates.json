@@ -1468,18 +1468,25 @@
     },
     {
       "id": "laundry",
-      "name": "Lundry",
+      "name": "Laundry",
       "categories": [
         {
-          "name": "Laundry Service",
+          "name": "Wash & Iron",
           "items": [
             {
-              "name": "Wash And Steam Iron",
-              "rate": 125.0
-            },
+              "name": "Wash & Iron (per kg)",
+              "rate": 125.0,
+              "unit": "kg"
+            }
+          ]
+        },
+        {
+          "name": "Wash & Fold",
+          "items": [
             {
-              "name": "Wash And Fold",
-              "rate": 80.0
+              "name": "Wash & Fold (per kg)",
+              "rate": 80.0,
+              "unit": "kg"
             }
           ]
         }

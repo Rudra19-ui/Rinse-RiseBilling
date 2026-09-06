@@ -955,6 +955,17 @@ function getSelectedCategory() {
   return service.categories[idx] || null;
 }
 
+function laundryCategoryIndexForTile(service) {
+  if (!service || service.id !== "laundry") return -1;
+  if (activeTile === "laundry") {
+    return service.categories.findIndex((cat) => /fold/i.test(cat.name));
+  }
+  if (activeTile === "laundry-iron") {
+    return service.categories.findIndex((cat) => /iron/i.test(cat.name));
+  }
+  return -1;
+}
+
 function populateServices() {
   els.serviceSelect.innerHTML = '<option value="">Select service...</option>';
   ratesData.services.forEach((s) => {
@@ -968,14 +979,17 @@ function populateServices() {
 let activeTile = "";
 
 const TILE_ITEM_FILTER = {
-  laundry: (item) =>
-    item.name === "Wash and Fold 80/kg" || item.name === "Wash and Iron 125/kg",
-  "laundry-iron": (item) => item.name === "Premium Laundry 200/kg",
+  laundry: (item) => /fold/i.test(item.name),
+  "laundry-iron": (item) => /iron/i.test(item.name),
 };
 
 const KG_ITEM_NAMES = new Set([
+  "Wash & Fold (per kg)",
+  "Wash & Iron (per kg)",
   "Wash and Fold 80/kg",
   "Wash and Iron 125/kg",
+  "Wash And Fold",
+  "Wash And Steam Iron",
   "Premium Laundry 200/kg",
 ]);
 
@@ -984,7 +998,11 @@ function isKgItem(item) {
   if (item.unit === "kg") return true;
   if (item.unit === "pc") return false;
   const name = item.name || "";
-  return KG_ITEM_NAMES.has(name) || /\/kg/i.test(name);
+  return (
+    KG_ITEM_NAMES.has(name) ||
+    /\/kg/i.test(name) ||
+    /wash.*(fold|iron)/i.test(name)
+  );
 }
 
 function getItemUnit(item) {
@@ -1125,10 +1143,13 @@ function onServiceChange(syncTile = true) {
     els.categorySelect.appendChild(opt);
   });
 
-  if (service.categories.length === 1) {
+  const laundryIdx = laundryCategoryIndexForTile(service);
+  if (laundryIdx >= 0) {
+    els.categorySelect.value = String(laundryIdx);
+  } else if (service.categories.length === 1) {
     els.categorySelect.value = "0";
-    onCategoryChange();
   }
+  onCategoryChange();
 }
 
 function onCategoryChange() {

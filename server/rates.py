@@ -74,7 +74,11 @@ def _normalize_rates(data: dict) -> dict:
                     raise ValueError(f"Invalid rate for '{item_name}'.") from exc
                 if rate < 0:
                     raise ValueError(f"Rate for '{item_name}' cannot be negative.")
-                items.append({"name": item_name, "rate": round(rate, 2)})
+                item_obj: dict = {"name": item_name, "rate": round(rate, 2)}
+                unit = str(raw_item.get("unit") or "").strip().lower()
+                if unit in ("kg", "pc"):
+                    item_obj["unit"] = unit
+                items.append(item_obj)
 
             categories.append({"name": category_name, "items": items})
 

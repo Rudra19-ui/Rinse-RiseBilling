@@ -36,8 +36,12 @@ const InvoicePdf = (() => {
   }
 
   const KG_ITEM_NAMES = new Set([
+    "Wash & Fold (per kg)",
+    "Wash & Iron (per kg)",
     "Wash and Fold 80/kg",
     "Wash and Iron 125/kg",
+    "Wash And Fold",
+    "Wash And Steam Iron",
     "Premium Laundry 200/kg",
   ]);
 
@@ -46,7 +50,11 @@ const InvoicePdf = (() => {
     if (item.unit === "kg") return true;
     if (item.unit === "pc") return false;
     const name = item.name || "";
-    return KG_ITEM_NAMES.has(name) || /\/kg/i.test(name);
+    return (
+      KG_ITEM_NAMES.has(name) ||
+      /\/kg/i.test(name) ||
+      /wash.*(fold|iron)/i.test(name)
+    );
   }
 
   function formatQtyDisplay(item) {
