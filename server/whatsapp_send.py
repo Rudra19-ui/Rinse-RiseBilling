@@ -64,11 +64,16 @@ def try_start_bridge(*, wait_seconds: float = 0) -> bool:
         return False
 
     try:
+        from paths import whatsapp_auth_dir, whatsapp_cache_dir
+
         log_path = BRIDGE_DIR / "bridge.log"
         log_file = open(log_path, "a", encoding="utf-8")
         env = os.environ.copy()
         env.setdefault("WHATSAPP_BRIDGE_PORT", "3001")
-        env.setdefault("PUPPETEER_EXECUTABLE_PATH", "/usr/bin/chromium")
+        env.setdefault("WHATSAPP_AUTH_DIR", str(whatsapp_auth_dir()))
+        env.setdefault("WHATSAPP_CACHE_DIR", str(whatsapp_cache_dir()))
+        if is_cloud_deployment():
+            env.setdefault("PUPPETEER_EXECUTABLE_PATH", "/usr/bin/chromium")
         subprocess.Popen(
             [node_exe, "server.js"],
             cwd=str(BRIDGE_DIR),
@@ -205,6 +210,14 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
     filename = invoice_filename(bill)
 
     status = get_bridge_status()
+    if not status.get("ready") and status.get("sessionRestoring"):
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            time.sleep(2)
+            status = get_bridge_status(auto_start=True)
+            if status.get("ready"):
+                break
+
     if not status.get("ready"):
         return {
             "sent": False,

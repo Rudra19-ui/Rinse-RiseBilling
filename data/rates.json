@@ -1474,16 +1474,12 @@
           "name": "Laundry Service",
           "items": [
             {
-              "name": "Wash and Fold 80/kg",
-              "rate": 80.0
-            },
-            {
-              "name": "Wash and Iron 125/kg",
+              "name": "Wash And Steam Iron",
               "rate": 125.0
             },
             {
-              "name": "Premium Laundry 200/kg",
-              "rate": 200.0
+              "name": "Wash And Fold",
+              "rate": 80.0
             }
           ]
         }

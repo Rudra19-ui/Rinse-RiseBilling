@@ -9,6 +9,8 @@ venv/
 # Local database & generated files
 data/rinse_rise.db
 data/invoices/
+data/whatsapp-auth/
+data/whatsapp-cache/
 *.pdf
 
 # Node / WhatsApp bridge
