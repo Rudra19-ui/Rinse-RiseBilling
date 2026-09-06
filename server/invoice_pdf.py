@@ -149,6 +149,40 @@ def _is_kg_item(item: dict[str, Any]) -> bool:
     }
 
 
+STARCH_RATE = 50
+
+
+def _item_starch_qty(item: dict[str, Any]) -> int:
+    if item.get("starchQty") is not None:
+        qty = int(float(item.get("starchQty") or 0))
+    elif item.get("starch") is True:
+        qty = int(float(item.get("qty") or 0))
+    elif item.get("starch"):
+        qty = int(float(item.get("starch") or 0))
+    else:
+        qty = 0
+    max_qty = int(float(item.get("qty") or 0))
+    return max(0, min(max_qty, qty))
+
+
+def _item_starch_extra(item: dict[str, Any]) -> float:
+    return STARCH_RATE * _item_starch_qty(item)
+
+
+def _item_line_amount(item: dict[str, Any]) -> float:
+    return float(item.get("rate") or 0) * float(item.get("qty") or 0) + _item_starch_extra(item)
+
+
+def _item_display_name(item: dict[str, Any]) -> str:
+    name = str(item.get("name") or "-")
+    starch_qty = _item_starch_qty(item)
+    if starch_qty > 0:
+        if starch_qty == 1:
+            return f"{name} + Starch ×1"
+        return f"{name} + Starch ×{starch_qty}"
+    return name
+
+
 def format_currency(amount: float | int) -> str:
     return f"Rs. {float(amount or 0):,.0f}"
 
@@ -207,7 +241,11 @@ def build_whatsapp_message(bill: dict[str, Any]) -> str:
     ]
 
     for i, item in enumerate(bill.get("items") or [], 1):
-        lines.append(f"{i}. {item.get('name', '-')}")
+        label = _item_display_name(item)
+        starch_qty = _item_starch_qty(item)
+        if starch_qty > 0:
+            label += f" (+{format_currency(STARCH_RATE)}/pc starch)"
+        lines.append(f"{i}. {label}")
 
     lines.append("")
     offer_lines = _offer_whatsapp_lines(bill)
@@ -509,11 +547,11 @@ def generate_invoice_pdf(bill: dict[str, Any], output_path: Path | str | None = 
     for i, item in enumerate(items):
         rate = float(item.get("rate") or 0)
         qty = float(item.get("qty") or 0)
-        amount = rate * qty
+        amount = _item_line_amount(item)
         fill = LIGHT if i % 2 == 0 else WHITE
         row = [
             str(i + 1),
-            str(item.get("name") or "-")[:48],
+            _item_display_name(item)[:48],
             format_service_name(str(item.get("service") or "-"))[:28],
             format_qty_display(item),
             format_currency(rate) + ("/kg" if _is_kg_item(item) else ""),

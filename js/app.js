@@ -1072,11 +1072,80 @@ function formatQtyRateLine(item) {
   return `${qty} pc × ${rate}`;
 }
 
+function getStarchQty(item) {
+  if (!item) return 0;
+  const qty = Number(item.qty) || 0;
+  if (item.starchQty != null && item.starchQty !== "") {
+    return Math.max(0, Math.min(qty, parseInt(item.starchQty, 10) || 0));
+  }
+  if (item.starch === true) return qty;
+  if (typeof item.starch === "number" && item.starch > 0) {
+    return Math.max(0, Math.min(qty, item.starch));
+  }
+  return 0;
+}
+
 function enrichBillItem(item) {
-  return {
+  const enriched = {
     ...item,
     unit: item.unit || getItemUnit(item),
   };
+  enriched.starchQty = getStarchQty(enriched);
+  return enriched;
+}
+
+const STARCH_RATE = 50;
+
+function hasStarch(item) {
+  return getStarchQty(item) > 0;
+}
+
+function getStarchExtra(item) {
+  return STARCH_RATE * getStarchQty(item);
+}
+
+function getItemLineAmount(item) {
+  const qty = Number(item.qty) || 0;
+  const starchQty = Math.min(getStarchQty(item), qty);
+  return (Number(item.rate) || 0) * qty + STARCH_RATE * starchQty;
+}
+
+function formatStarchTagText(item) {
+  const starchQty = getStarchQty(item);
+  if (starchQty <= 0) return "";
+  if (starchQty === 1) return "+ Starch ×1";
+  return `+ Starch ×${starchQty}`;
+}
+
+function formatStarchNoteText(item) {
+  const starchQty = getStarchQty(item);
+  if (starchQty <= 0) return "";
+  return `+${formatCurrency(getStarchExtra(item))} starch (${starchQty} pc)`;
+}
+
+function formatStarchReceiptDetail(item) {
+  const starchQty = getStarchQty(item);
+  if (starchQty <= 0) return "";
+  return ` + starch ${starchQty} pc × ${formatCurrency(STARCH_RATE)}`;
+}
+
+function clampItemStarchQty(item) {
+  if (!item) return;
+  item.starchQty = Math.max(0, Math.min(Number(item.qty) || 0, getStarchQty(item)));
+}
+
+function renderStarchCellHtml(item) {
+  if (isKgItem(item)) return '<span class="starch-na">—</span>';
+  const starchQty = getStarchQty(item);
+  const extra = formatCurrency(STARCH_RATE);
+  return `
+    <div class="starch-control" title="Starch (+${extra}/pc)">
+      <button type="button" data-action="starch-minus" data-key="${item.key}" ${starchQty <= 0 ? "disabled" : ""}>−</button>
+      <span class="starch-qty-value">${starchQty}</span>
+      <span class="qty-unit">pc</span>
+      <button type="button" data-action="starch-plus" data-key="${item.key}" ${starchQty >= item.qty ? "disabled" : ""}>+</button>
+    </div>
+  `;
 }
 
 function renderQtyCellHtml(item) {
@@ -1262,6 +1331,7 @@ function updateQty(key, delta) {
   if (!item) return;
   const step = getQtyStep(item) * (delta > 0 ? 1 : -1);
   item.qty = normalizeQty(item, item.qty + step);
+  clampItemStarchQty(item);
   if (item.qty <= 0) {
     removeItem(key);
   } else {
@@ -1276,6 +1346,7 @@ function setItemQty(key, value) {
   if (!item) return;
   if (isPartialQtyInput(value)) return;
   item.qty = normalizeQty(item, value);
+  clampItemStarchQty(item);
   if (item.qty <= 0) {
     removeItem(key);
   } else {
@@ -1305,7 +1376,7 @@ function previewBillItemQty(key, rawValue) {
   if (Number.isNaN(parsed)) return;
   const row = els.billItems.querySelector(`tr[data-key="${key}"]`);
   const amountCell = row?.querySelector(".line-amount strong");
-  if (amountCell) amountCell.textContent = formatCurrency(item.rate * parsed);
+  if (amountCell) amountCell.textContent = formatCurrency(getItemLineAmount({ ...item, qty: parsed }));
 }
 
 function updateRate(key, newRate) {
@@ -1341,12 +1412,53 @@ function updateRowAmount(key) {
 
   const amountCell = row.querySelector(".line-amount strong");
   if (amountCell) {
-    amountCell.textContent = formatCurrency(item.rate * item.qty);
+    amountCell.textContent = formatCurrency(getItemLineAmount(item));
+  }
+  const starchNote = row.querySelector(".starch-note");
+  if (hasStarch(item)) {
+    const noteText = formatStarchNoteText(item);
+    if (starchNote) starchNote.textContent = noteText;
+    else row.querySelector(".line-amount")?.insertAdjacentHTML(
+      "beforeend",
+      `<small class="starch-note">${noteText}</small>`
+    );
+  } else if (starchNote) {
+    starchNote.remove();
+  }
+
+  const starchQtySpan = row.querySelector(".starch-qty-value");
+  if (starchQtySpan) starchQtySpan.textContent = getStarchQty(item);
+  const starchMinus = row.querySelector('[data-action="starch-minus"]');
+  const starchPlus = row.querySelector('[data-action="starch-plus"]');
+  if (starchMinus) starchMinus.disabled = getStarchQty(item) <= 0;
+  if (starchPlus) starchPlus.disabled = getStarchQty(item) >= item.qty;
+
+  const nameCell = row.querySelector("td:nth-child(2)");
+  if (nameCell) {
+    const tag = nameCell.querySelector(".starch-tag");
+    const tagText = formatStarchTagText(item);
+    if (tagText && !tag) {
+      nameCell.insertAdjacentHTML("beforeend", ` <span class="starch-tag">${tagText}</span>`);
+    } else if (tagText && tag) {
+      tag.textContent = tagText;
+    } else if (!tagText && tag) {
+      tag.remove();
+    }
   }
 }
 
+function updateStarchQty(key, delta) {
+  const item = billItems.find((b) => b.key === key);
+  if (!item || isKgItem(item)) return;
+  const maxQty = Number(item.qty) || 0;
+  const next = Math.max(0, Math.min(maxQty, getStarchQty(item) + delta));
+  item.starchQty = next;
+  updateRowAmount(key);
+  updateTotals();
+}
+
 function getSubtotal() {
-  return billItems.reduce((sum, item) => sum + item.rate * item.qty, 0);
+  return billItems.reduce((sum, item) => sum + getItemLineAmount(item), 0);
 }
 
 function getDiscountPercent() {
@@ -4129,7 +4241,7 @@ function renderHistoryList() {
 }
 
 function computeBillTotals(items, discountPercent) {
-  const subtotal = items.reduce((sum, item) => sum + item.rate * item.qty, 0);
+  const subtotal = items.reduce((sum, item) => sum + getItemLineAmount(item), 0);
   const discountAmount = Math.round((subtotal * discountPercent) / 100);
   const total = subtotal - discountAmount;
   return { subtotal, discountAmount, total };
@@ -4312,8 +4424,7 @@ function bindHistoryEditEvents() {
       const parsed = parseFloat(input.value);
       if (Number.isNaN(parsed)) return;
       const row = input.closest("tr");
-      const amountCell = row?.querySelector("[data-line-amount]");
-      if (amountCell) amountCell.textContent = formatCurrency(item.rate * parsed);
+      updateHistoryEditLineAmount(row, { ...item, qty: parsed });
     });
     input.addEventListener("blur", () => {
       const item = draft.items.find((b) => b.key === input.dataset.key);
@@ -4323,11 +4434,10 @@ function bindHistoryEditEvents() {
         return;
       }
       item.qty = normalizeQty(item, input.value);
+      clampItemStarchQty(item);
       input.value = formatQtyInputValue(item, item.qty);
       refreshHistoryEditSummary();
-      const row = input.closest("tr");
-      const amountCell = row?.querySelector("[data-line-amount]");
-      if (amountCell) amountCell.textContent = formatCurrency(item.rate * item.qty);
+      updateHistoryEditLineAmount(input.closest("tr"), item);
     });
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -4343,9 +4453,13 @@ function bindHistoryEditEvents() {
       if (!item) return;
       item.rate = Math.max(0, parseFloat(input.value) || 0);
       refreshHistoryEditSummary();
-      const row = input.closest("tr");
-      const amountCell = row?.querySelector("[data-line-amount]");
-      if (amountCell) amountCell.textContent = formatCurrency(item.rate * item.qty);
+      updateHistoryEditLineAmount(input.closest("tr"), item);
+    });
+  });
+
+  els.historyDetail.querySelectorAll('[data-action="starch-minus"], [data-action="starch-plus"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      updateHistoryEditStarchQty(btn.dataset.key, btn.dataset.action === "starch-plus" ? 1 : -1);
     });
   });
 
@@ -4448,16 +4562,52 @@ async function saveHistoryEdit(btn) {
   }
 }
 
+function updateHistoryEditLineAmount(row, item) {
+  if (!row || !item) return;
+  const amountCell = row.querySelector("[data-line-amount]");
+  if (!amountCell) return;
+  amountCell.innerHTML = `<strong>${formatCurrency(getItemLineAmount(item))}</strong>${hasStarch(item) ? `<small class="starch-note">${formatStarchNoteText(item)}</small>` : ""}`;
+
+  const starchQtySpan = row.querySelector(".starch-qty-value");
+  if (starchQtySpan) starchQtySpan.textContent = getStarchQty(item);
+  const starchMinus = row.querySelector('[data-action="starch-minus"]');
+  const starchPlus = row.querySelector('[data-action="starch-plus"]');
+  if (starchMinus) starchMinus.disabled = getStarchQty(item) <= 0;
+  if (starchPlus) starchPlus.disabled = getStarchQty(item) >= item.qty;
+
+  const nameCell = row.querySelector("td:nth-child(2)");
+  const tag = nameCell?.querySelector(".starch-tag");
+  const tagText = formatStarchTagText(item);
+  if (tagText && nameCell && !tag) {
+    nameCell.insertAdjacentHTML("beforeend", ` <span class="starch-tag">${tagText}</span>`);
+  } else if (tagText && tag) {
+    tag.textContent = tagText;
+  } else if (!tagText && tag) {
+    tag.remove();
+  }
+}
+
+function updateHistoryEditStarchQty(key, delta) {
+  if (!historyEditDraft) return;
+  const item = historyEditDraft.items.find((b) => b.key === key);
+  if (!item || isKgItem(item)) return;
+  const maxQty = Number(item.qty) || 0;
+  item.starchQty = Math.max(0, Math.min(maxQty, getStarchQty(item) + delta));
+  const row = els.historyDetail.querySelector(`tr[data-key="${key}"]`);
+  if (row) updateHistoryEditLineAmount(row, item);
+  refreshHistoryEditSummary();
+}
+
 function renderHistoryDetailEdit(bill) {
   recalcHistoryEditDraft();
 
   const itemsHtml = bill.items
     .map((item, i) => {
-      const amount = item.rate * item.qty;
+      const amount = getItemLineAmount(item);
       return `
-        <tr>
+        <tr data-key="${item.key}">
           <td>${i + 1}</td>
-          <td>${item.name}</td>
+          <td>${item.name}${hasStarch(item) ? ` <span class="starch-tag">${formatStarchTagText(item)}</span>` : ""}</td>
           <td>${item.service}</td>
           <td>
             <div class="qty-edit-wrap">
@@ -4466,7 +4616,8 @@ function renderHistoryDetailEdit(bill) {
             </div>
           </td>
           <td><input type="number" class="history-edit-input history-edit-rate" data-key="${item.key}" value="${item.rate}" min="0" step="1"></td>
-          <td data-line-amount><strong>${formatCurrency(amount)}</strong></td>
+          <td data-line-amount><strong>${formatCurrency(amount)}</strong>${hasStarch(item) ? `<small class="starch-note">${formatStarchNoteText(item)}</small>` : ""}</td>
+          <td class="starch-cell">${renderStarchCellHtml(item)}</td>
           <td><button type="button" class="btn-remove" data-action="remove-item" data-key="${item.key}" title="Remove">×</button></td>
         </tr>
       `;
@@ -4572,6 +4723,7 @@ function renderHistoryDetailEdit(bill) {
           <th>Qty / Kg</th>
           <th>Rate</th>
           <th>Amount</th>
+          <th>Starch</th>
           <th></th>
         </tr>
       </thead>
@@ -4611,15 +4763,15 @@ function renderHistoryDetail(bill) {
 
   const itemsHtml = bill.items
     .map((item, i) => {
-      const amount = item.rate * item.qty;
+      const amount = getItemLineAmount(item);
       return `
         <tr>
           <td>${i + 1}</td>
-          <td>${item.name}</td>
+          <td>${item.name}${hasStarch(item) ? ` <span class="starch-tag">${formatStarchTagText(item)}</span>` : ""}</td>
           <td>${item.service}</td>
           <td>${formatQtyDisplay(item)}</td>
           <td>${formatCurrency(item.rate)}</td>
-          <td><strong>${formatCurrency(amount)}</strong></td>
+          <td><strong>${formatCurrency(amount)}</strong>${hasStarch(item) ? `<small class="starch-note">${formatStarchNoteText(item)}</small>` : ""}</td>
         </tr>
       `;
     })
@@ -4736,16 +4888,16 @@ function buildReceiptFromRecord(bill) {
 
   els.rItems.innerHTML = "";
   bill.items.forEach((item) => {
-    const amount = item.rate * item.qty;
+    const amount = getItemLineAmount(item);
     const line = document.createElement("div");
     line.className = "receipt-line";
     line.innerHTML = `
       <div class="receipt-line-header">
-        <span>${item.name}</span>
+        <span>${item.name}${hasStarch(item) ? ` ${formatStarchTagText(item)}` : ""}</span>
         <span>${formatCurrency(amount)}</span>
       </div>
       <div class="receipt-line-detail">
-        <span>${formatQtyRateLine(item)}</span>
+        <span>${formatQtyRateLine(item)}${formatStarchReceiptDetail(item)}</span>
         <span>${item.service}</span>
       </div>
     `;
@@ -4917,7 +5069,7 @@ function renderBill() {
 
   if (billItems.length === 0) {
     tbody.innerHTML =
-      '<tr class="empty-row"><td colspan="7">No items added yet</td></tr>';
+      '<tr class="empty-row"><td colspan="8">No items added yet</td></tr>';
     els.discountPercent.value = "0";
     clearOfferSelection();
     updateTotals();
@@ -4926,12 +5078,12 @@ function renderBill() {
   }
 
   billItems.forEach((item, i) => {
-    const amount = item.rate * item.qty;
+    const amount = getItemLineAmount(item);
     const tr = document.createElement("tr");
     tr.dataset.key = item.key;
     tr.innerHTML = `
       <td>${i + 1}</td>
-      <td>${item.name}</td>
+      <td>${item.name}${hasStarch(item) ? ` <span class="starch-tag">${formatStarchTagText(item)}</span>` : ""}</td>
       <td>${item.service} / ${item.category}</td>
       <td>${renderQtyCellHtml(item)}</td>
       <td class="rate-cell">
@@ -4940,16 +5092,23 @@ function renderBill() {
           <input type="number" class="rate-input" data-key="${item.key}" value="${item.rate}" min="0" step="1" title="Edit price">
         </div>
       </td>
-      <td class="line-amount"><strong>${formatCurrency(amount)}</strong></td>
+      <td class="line-amount"><strong>${formatCurrency(amount)}</strong>${hasStarch(item) ? `<small class="starch-note">${formatStarchNoteText(item)}</small>` : ""}</td>
+      <td class="starch-cell">${renderStarchCellHtml(item)}</td>
       <td><button type="button" class="btn-remove" data-key="${item.key}" title="Remove">×</button></td>
     `;
     tbody.appendChild(tr);
   });
 
-  tbody.querySelectorAll("[data-action]").forEach((btn) => {
+  tbody.querySelectorAll('[data-action="minus"], [data-action="plus"]').forEach((btn) => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.key;
       updateQty(key, btn.dataset.action === "plus" ? 1 : -1);
+    });
+  });
+
+  tbody.querySelectorAll('[data-action="starch-minus"], [data-action="starch-plus"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      updateStarchQty(btn.dataset.key, btn.dataset.action === "starch-plus" ? 1 : -1);
     });
   });
 
@@ -4992,16 +5151,16 @@ function buildReceipt() {
 
   els.rItems.innerHTML = "";
   billItems.forEach((item) => {
-    const amount = item.rate * item.qty;
+    const amount = getItemLineAmount(item);
     const line = document.createElement("div");
     line.className = "receipt-line";
     line.innerHTML = `
       <div class="receipt-line-header">
-        <span>${item.name}</span>
+        <span>${item.name}${hasStarch(item) ? ` ${formatStarchTagText(item)}` : ""}</span>
         <span>${formatCurrency(amount)}</span>
       </div>
       <div class="receipt-line-detail">
-        <span>${formatQtyRateLine(item)}</span>
+        <span>${formatQtyRateLine(item)}${formatStarchReceiptDetail(item)}</span>
         <span>${item.service}</span>
       </div>
     `;

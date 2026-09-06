@@ -223,6 +223,39 @@ const InvoicePdf = (() => {
     });
   }
 
+  const STARCH_RATE = 50;
+
+  function getStarchQty(item) {
+    if (!item) return 0;
+    const qty = Number(item.qty) || 0;
+    if (item.starchQty != null && item.starchQty !== "") {
+      return Math.max(0, Math.min(qty, parseInt(item.starchQty, 10) || 0));
+    }
+    if (item.starch === true) return qty;
+    if (typeof item.starch === "number" && item.starch > 0) {
+      return Math.max(0, Math.min(qty, item.starch));
+    }
+    return 0;
+  }
+
+  function getStarchExtra(item) {
+    return STARCH_RATE * getStarchQty(item);
+  }
+
+  function getItemLineAmount(item) {
+    const qty = Number(item.qty) || 0;
+    const starchQty = Math.min(getStarchQty(item), qty);
+    return (Number(item.rate) || 0) * qty + STARCH_RATE * starchQty;
+  }
+
+  function itemDisplayName(item) {
+    const name = item.name || "—";
+    const starchQty = getStarchQty(item);
+    if (starchQty <= 0) return name;
+    if (starchQty === 1) return `${name} + Starch ×1`;
+    return `${name} + Starch ×${starchQty}`;
+  }
+
   function normalizeBillForPdf(bill) {
     return {
       ...bill,
@@ -284,10 +317,10 @@ const InvoicePdf = (() => {
     y += boxH + 10;
 
     const tableBody = (bill.items || []).map((item, i) => {
-      const amount = (item.rate || 0) * (item.qty || 0);
+      const amount = getItemLineAmount(item);
       return [
         String(i + 1),
-        item.name || "—",
+        itemDisplayName(item),
         formatServiceName(item.service),
         formatQtyDisplay(item),
         formatCurrency(item.rate) + (isKgItem(item) ? "/kg" : ""),

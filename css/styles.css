@@ -1142,6 +1142,125 @@ body {
   white-space: nowrap;
 }
 
+.line-amount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+
+.starch-note {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--orange);
+  white-space: nowrap;
+}
+
+.starch-tag {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--orange);
+  background: rgba(242, 101, 34, 0.12);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.starch-cell {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.starch-na {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.starch-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: rgba(242, 101, 34, 0.08);
+  border: 1px solid rgba(242, 101, 34, 0.25);
+  border-radius: 4px;
+  padding: 0.15rem 0.25rem;
+}
+
+.starch-control button {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 3px;
+  background: var(--orange);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
+.starch-control button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.starch-control button[data-action="starch-minus"] {
+  background: #fff;
+  color: var(--danger);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.starch-qty-value {
+  min-width: 1rem;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--black);
+}
+
+.starch-control .qty-unit {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.btn-starch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 0.3rem 0.5rem;
+  border: 1.5px solid var(--orange);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--orange);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-starch:hover {
+  background: rgba(242, 101, 34, 0.08);
+}
+
+.btn-starch.active {
+  background: var(--orange);
+  color: #fff;
+  border-color: var(--orange);
+}
+
+.history-items-table .starch-note,
+.history-items-table-edit .starch-note {
+  display: block;
+  text-align: right;
+}
+
 label {
   display: flex;
   flex-direction: column;

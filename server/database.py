@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS bill_items (
     rate REAL NOT NULL,
     qty REAL NOT NULL DEFAULT 1,
     unit TEXT DEFAULT '',
+    starch INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
 );
 
@@ -132,7 +133,8 @@ CREATE TABLE IF NOT EXISTS bill_items (
     category TEXT,
     rate DOUBLE PRECISION NOT NULL,
     qty DOUBLE PRECISION NOT NULL DEFAULT 1,
-    unit TEXT DEFAULT ''
+    unit TEXT DEFAULT '',
+    starch INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_bills_phone ON bills(phone_key);
@@ -190,6 +192,7 @@ def _run_schema_migrations(conn: DbConnection) -> None:
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS offer_details TEXT DEFAULT ''",
             "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_favorite INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT ''",
+            "ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS starch INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in pg_alters:
             conn.execute(sql)
@@ -234,6 +237,11 @@ def _run_schema_migrations(conn: DbConnection) -> None:
     if "unit" not in item_cols:
         conn.execute(
             "ALTER TABLE bill_items ADD COLUMN unit TEXT DEFAULT ''"
+        )
+    item_cols = conn.table_columns("bill_items")
+    if "starch" not in item_cols:
+        conn.execute(
+            "ALTER TABLE bill_items ADD COLUMN starch INTEGER NOT NULL DEFAULT 0"
         )
     conn.execute(
         """
@@ -326,25 +334,52 @@ def _row_keys(row: Any) -> set[str]:
     return set()
 
 
+def _save_bill_item(conn: DbConnection, bill_id: int, item: dict[str, Any]) -> None:
+    conn.execute(
+        """
+        INSERT INTO bill_items (bill_id, item_key, name, service, category, rate, qty, unit, starch)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            bill_id,
+            item.get("key", ""),
+            item.get("name", ""),
+            item.get("service", ""),
+            item.get("category", "") or "",
+            item.get("rate", 0),
+            float(item.get("qty", 1) or 1),
+            item.get("unit") or _infer_item_unit(item),
+            _starch_qty_for_save(item),
+        ),
+    )
+
+
+def _starch_qty_for_save(item: dict[str, Any]) -> int:
+    if item.get("starchQty") is not None:
+        return max(0, int(item.get("starchQty") or 0))
+    if item.get("starch") is True:
+        return max(0, int(float(item.get("qty") or 0)))
+    if isinstance(item.get("starch"), (int, float)) and item.get("starch"):
+        return max(0, int(item.get("starch")))
+    return 0
+
+
 def _fetch_items(conn: DbConnection, bill_id: int) -> list[dict[str, Any]]:
     item_cols = conn.table_columns("bill_items")
     has_unit = "unit" in item_cols
+    has_starch = "starch" in item_cols
+    select_cols = "item_key, name, service, category, rate, qty"
     if has_unit:
-        rows = conn.execute(
-            """
-            SELECT item_key, name, service, category, rate, qty, unit
-            FROM bill_items WHERE bill_id = ? ORDER BY id
-            """,
-            (bill_id,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT item_key, name, service, category, rate, qty
-            FROM bill_items WHERE bill_id = ? ORDER BY id
-            """,
-            (bill_id,),
-        ).fetchall()
+        select_cols += ", unit"
+    if has_starch:
+        select_cols += ", starch"
+    rows = conn.execute(
+        f"""
+        SELECT {select_cols}
+        FROM bill_items WHERE bill_id = ? ORDER BY id
+        """,
+        (bill_id,),
+    ).fetchall()
     items = []
     for r in rows:
         keys = _row_keys(r)
@@ -355,6 +390,7 @@ def _fetch_items(conn: DbConnection, bill_id: int) -> list[dict[str, Any]]:
             "category": r["category"] or "",
             "rate": r["rate"],
             "qty": float(r["qty"] or 0),
+            "starchQty": int(r["starch"] or 0) if has_starch and "starch" in keys else 0,
         }
         item["unit"] = _infer_item_unit(
             {**item, "unit": (r["unit"] if has_unit and "unit" in keys else "") or ""}
@@ -634,22 +670,7 @@ def create_bill(payload: dict[str, Any], *, honor_bill_no: bool = False) -> dict
             )
 
             for item in payload.get("items", []):
-                conn.execute(
-                    """
-                    INSERT INTO bill_items (bill_id, item_key, name, service, category, rate, qty, unit)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        bill_id,
-                        item.get("key", ""),
-                        item.get("name", ""),
-                        item.get("service", ""),
-                        item.get("category", ""),
-                        item.get("rate", 0),
-                        float(item.get("qty", 1) or 1),
-                        item.get("unit") or _infer_item_unit(item),
-                    ),
-                )
+                _save_bill_item(conn, bill_id, item)
 
             conn.commit()
 
@@ -737,22 +758,7 @@ def update_bill(bill_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
 
         conn.execute("DELETE FROM bill_items WHERE bill_id = ?", (bill_id,))
         for item in items:
-            conn.execute(
-                """
-                INSERT INTO bill_items (bill_id, item_key, name, service, category, rate, qty, unit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    bill_id,
-                    item.get("key", ""),
-                    item.get("name", ""),
-                    item.get("service", ""),
-                    item.get("category", ""),
-                    item.get("rate", 0),
-                    float(item.get("qty", 1) or 1),
-                    item.get("unit") or _infer_item_unit(item),
-                ),
-            )
+            _save_bill_item(conn, bill_id, item)
 
         conn.commit()
 
