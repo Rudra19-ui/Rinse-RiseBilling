@@ -707,7 +707,7 @@ function parseWhatsAppSendError(message) {
   if (/payment type is required/i.test(msg)) return getWhatsAppPaymentBlockMessage(["paymentType"]);
   if (/payment info is required/i.test(msg)) return getWhatsAppPaymentBlockMessage(["paymentInfo"]);
   if (/delivery done/i.test(msg)) return getWhatsAppDeliveryBlockMessage();
-  if (/getchat|still loading|chat system|chat store|not ready yet/i.test(msg)) {
+  if (/getchat|still loading|chat system|chat store|not ready yet|startcomms|sendiq|\[comms\]/i.test(msg)) {
     return getWhatsAppConnectionBlockMessage();
   }
   return null;
@@ -961,7 +961,12 @@ function laundryCategoryIndexForTile(service) {
     return service.categories.findIndex((cat) => /fold/i.test(cat.name));
   }
   if (activeTile === "laundry-iron") {
-    return service.categories.findIndex((cat) => /iron/i.test(cat.name));
+    return service.categories.findIndex(
+      (cat) => /iron/i.test(cat.name) && !/premium/i.test(cat.name)
+    );
+  }
+  if (activeTile === "laundry-premium") {
+    return service.categories.findIndex((cat) => /premium/i.test(cat.name));
   }
   return -1;
 }
@@ -980,12 +985,14 @@ let activeTile = "";
 
 const TILE_ITEM_FILTER = {
   laundry: (item) => /fold/i.test(item.name),
-  "laundry-iron": (item) => /iron/i.test(item.name),
+  "laundry-iron": (item) => /iron/i.test(item.name) && !/premium/i.test(item.name),
+  "laundry-premium": (item) => /premium/i.test(item.name),
 };
 
 const KG_ITEM_NAMES = new Set([
   "Wash & Fold (per kg)",
   "Wash & Iron (per kg)",
+  "Premium Laundry (per kg)",
   "Wash and Fold 80/kg",
   "Wash and Iron 125/kg",
   "Wash And Fold",
@@ -1001,7 +1008,8 @@ function isKgItem(item) {
   return (
     KG_ITEM_NAMES.has(name) ||
     /\/kg/i.test(name) ||
-    /wash.*(fold|iron)/i.test(name)
+    /wash.*(fold|iron)/i.test(name) ||
+    /premium laundry/i.test(name)
   );
 }
 

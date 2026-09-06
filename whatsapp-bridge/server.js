@@ -178,11 +178,11 @@ function markReady(source) {
   state.phase = "connecting";
   state.authenticatingSince = null;
   markSessionLinked();
-  console.log(`[WhatsApp] CONNECTED (${source}) — waiting for chat store…`);
+  console.log(`[WhatsApp] CONNECTED (${source}) — waiting for chat store & comms…`);
 
-  waitForStoreReady(60000)
-    .then((storeOk) => {
-      if (storeOk) {
+  waitForFullyReady(90000)
+    .then((ok) => {
+      if (ok) {
         state.phase = "ready";
         state.ready = true;
         state.lastError = null;
@@ -192,7 +192,7 @@ function markReady(source) {
       state.phase = "loading";
       state.ready = false;
       state.lastError =
-        "WhatsApp linked — chat system still loading. Wait about 1 minute, then try sending again.";
+        "WhatsApp linked — still finishing setup. Wait about 1 minute, then try sending again.";
       startStoreReadyPoll();
     })
     .catch((err) => {
@@ -329,6 +329,50 @@ async function waitForStoreReady(timeoutMs = 60000) {
   return false;
 }
 
+/** sendIq fails with startComms if the socket layer is not up yet. */
+async function isCommsReady() {
+  if (!client?.pupPage) return false;
+  try {
+    return await client.pupPage.evaluate(() => {
+      try {
+        const Conn = window.require?.("WAWebConnModel")?.Conn;
+        if (Conn?.connected || Conn?.wid) return true;
+        const me = window.require?.("WAWebUserPrefsMeUser")?.getMaybeMePnUser?.();
+        if (me) return true;
+        const stream = window.require?.("WAWebStreamModel")?.Stream;
+        if (stream?.mode === "MAIN" || stream?.uiActive) return true;
+        return false;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function waitForCommsReady(timeoutMs = 45000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await isCommsReady()) return true;
+    await sleep(1500);
+  }
+  return false;
+}
+
+async function waitForFullyReady(timeoutMs = 90000) {
+  const storeOk = await waitForStoreReady(Math.min(timeoutMs, 60000));
+  if (!storeOk) return false;
+  const commsOk = await waitForCommsReady(Math.min(timeoutMs, 45000));
+  if (!commsOk) {
+    // Hosted Chrome often needs a short grace period after the chat store loads.
+    await sleep(8000);
+  } else {
+    await sleep(2500);
+  }
+  return (await isWhatsAppStoreReady()) && (await isCommsReady());
+}
+
 function startStoreReadyPoll() {
   if (startStoreReadyPoll._timer) return;
   startStoreReadyPoll._timer = setInterval(async () => {
@@ -338,11 +382,11 @@ function startStoreReadyPoll() {
       return;
     }
     try {
-      if (await isWhatsAppStoreReady()) {
+      if (await isWhatsAppStoreReady() && (await isCommsReady())) {
         state.phase = "ready";
         state.ready = true;
         state.lastError = null;
-        console.log("[WhatsApp] Chat store ready.");
+        console.log("[WhatsApp] Chat store & comms ready.");
         clearInterval(startStoreReadyPoll._timer);
         startStoreReadyPoll._timer = null;
       }
@@ -711,6 +755,20 @@ async function assertSendReady() {
     err.code = "STORE_NOT_READY";
     throw err;
   }
+  if (!(await isCommsReady())) {
+    state.ready = false;
+    state.phase = "loading";
+    state.lastError = "WhatsApp is still connecting. Wait 30 seconds and try again.";
+    const commsOk = await waitForCommsReady(30000);
+    if (!commsOk) {
+      const err = new Error(
+        "WhatsApp is still starting its send layer. Wait about 30 seconds, then try again."
+      );
+      err.code = "COMMS_NOT_READY";
+      throw err;
+    }
+    await sleep(2000);
+  }
 }
 
 async function performSend(digits, message, filePath, filename) {
@@ -722,7 +780,7 @@ async function performSend(digits, message, filePath, filename) {
 
   let lastErr = null;
   for (const chatId of targets) {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
       try {
         await assertSendReady();
         await ensureChatRegistered(chatId);
@@ -737,9 +795,9 @@ async function performSend(digits, message, filePath, filename) {
           console.warn(`[WhatsApp] LID error on ${chatId} — trying alternate chat id…`);
           break;
         }
-        if (isCommsError(err) && attempt < 3) {
-          console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/3) — retrying…`);
-          await sleep(2500 * attempt);
+        if (isCommsError(err) && attempt < 6) {
+          console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/6) — retrying…`);
+          await sleep(4000 * attempt);
           continue;
         }
         throw err;
@@ -827,9 +885,11 @@ app.post("/send", async (req, res) => {
         console.error("[WhatsApp] Send session error:", err.message);
         const reconnected = await softRecoverClient(err.message);
         if (!reconnected) {
-          const friendly = isStoreError(err)
-            ? "WhatsApp chat system is not ready yet. Wait 1 minute, open WhatsApp in the header, then try again."
-            : "WhatsApp send layer not ready. Open WhatsApp in the header, scan QR if shown, wait 10 seconds, then try again.";
+          const friendly = isCommsError(err)
+            ? "WhatsApp is still starting on the server. Wait 1 minute, then tap Send on WhatsApp again."
+            : isStoreError(err)
+              ? "WhatsApp chat system is not ready yet. Wait 1 minute, open WhatsApp in the header, then try again."
+              : "WhatsApp send layer not ready. Open WhatsApp in the header, wait until it shows Ready, then try again.";
           return res.status(503).json({
             error: friendly,
             needsReconnect: true,
@@ -843,6 +903,14 @@ app.post("/send", async (req, res) => {
         return res.status(503).json({
           error:
             "WhatsApp is still loading its chat system. Wait about 1 minute, then try Send on WhatsApp again.",
+          needsReconnect: true,
+        });
+      }
+
+      if (isCommsError(err)) {
+        return res.status(503).json({
+          error:
+            "WhatsApp is still connecting on the server. Wait about 1 minute, then try Send on WhatsApp again.",
           needsReconnect: true,
         });
       }

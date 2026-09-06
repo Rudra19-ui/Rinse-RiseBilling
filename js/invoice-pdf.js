@@ -38,6 +38,7 @@ const InvoicePdf = (() => {
   const KG_ITEM_NAMES = new Set([
     "Wash & Fold (per kg)",
     "Wash & Iron (per kg)",
+    "Premium Laundry (per kg)",
     "Wash and Fold 80/kg",
     "Wash and Iron 125/kg",
     "Wash And Fold",
@@ -53,7 +54,8 @@ const InvoicePdf = (() => {
     return (
       KG_ITEM_NAMES.has(name) ||
       /\/kg/i.test(name) ||
-      /wash.*(fold|iron)/i.test(name)
+      /wash.*(fold|iron)/i.test(name) ||
+      /premium laundry/i.test(name)
     );
   }
 

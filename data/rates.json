@@ -1489,6 +1489,16 @@
               "unit": "kg"
             }
           ]
+        },
+        {
+          "name": "Premium Laundry",
+          "items": [
+            {
+              "name": "Premium Laundry (per kg)",
+              "rate": 200.0,
+              "unit": "kg"
+            }
+          ]
         }
       ]
     },

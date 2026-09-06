@@ -342,7 +342,7 @@ body {
 /* ===== SERVICE TILES ===== */
 .service-tiles {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }
@@ -3747,7 +3747,7 @@ select:disabled {
 
 @media (max-width: 900px) {
   .service-tiles {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 

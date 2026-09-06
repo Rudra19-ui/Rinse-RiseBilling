@@ -68,8 +68,11 @@ def parse_simple(df):
     return items
 
 
+PREMIUM_LAUNDRY_RATE = 200.0
+
+
 def parse_laundry_categories(df):
-    """Each laundry line becomes its own category (Wash & Fold, Wash & Iron)."""
+    """Each laundry line becomes its own category, plus Premium Laundry."""
     categories = []
     for item in parse_simple(df):
         raw = item["name"].lower()
@@ -91,6 +94,18 @@ def parse_laundry_categories(df):
                 ],
             }
         )
+    categories.append(
+        {
+            "name": "Premium Laundry",
+            "items": [
+                {
+                    "name": "Premium Laundry (per kg)",
+                    "rate": PREMIUM_LAUNDRY_RATE,
+                    "unit": "kg",
+                }
+            ],
+        }
+    )
     return categories
 
 
