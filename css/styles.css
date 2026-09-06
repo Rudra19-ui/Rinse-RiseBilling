@@ -1096,17 +1096,18 @@ body {
 }
 
 .rate-cell {
-  min-width: 90px;
+  text-align: center;
 }
 
 .rate-input-wrap {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   border: 2px solid var(--cream-dark);
   border-radius: 6px;
-  overflow: hidden;
   background: var(--white);
-  max-width: 100px;
+  min-width: 108px;
+  max-width: 118px;
+  margin: 0 auto;
 }
 
 .rate-input-wrap:focus-within {
@@ -1124,8 +1125,9 @@ body {
 
 .rate-input {
   width: 100%;
+  min-width: 3.25rem;
   border: none !important;
-  padding: 0.35rem 0.4rem !important;
+  padding: 0.35rem 0.5rem 0.35rem 0.15rem !important;
   font-size: 0.88rem !important;
   font-weight: 700 !important;
   box-shadow: none !important;
@@ -1145,8 +1147,10 @@ body {
 .line-amount {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: center;
   gap: 0.15rem;
+  text-align: center;
 }
 
 .starch-note {
@@ -1182,25 +1186,31 @@ body {
 .starch-control {
   display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
-  background: rgba(242, 101, 34, 0.08);
-  border: 1px solid rgba(242, 101, 34, 0.25);
-  border-radius: 4px;
-  padding: 0.15rem 0.25rem;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0;
+  margin: 0 auto;
 }
 
 .starch-control button {
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 3px;
-  background: var(--orange);
-  color: #fff;
-  font-size: 0.9rem;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--cream-dark);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--orange);
+  font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
   line-height: 1;
   padding: 0;
+  transition: all 0.15s;
+}
+
+.starch-control button:not(:disabled):hover {
+  background: var(--orange);
+  color: var(--white);
+  border-color: var(--orange);
 }
 
 .starch-control button:disabled {
@@ -1208,16 +1218,16 @@ body {
   cursor: not-allowed;
 }
 
-.starch-control button[data-action="starch-minus"] {
-  background: #fff;
+.starch-control button[data-action="starch-minus"]:not(:disabled):hover {
   color: var(--danger);
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: var(--white);
+  border-color: var(--danger);
 }
 
 .starch-qty-value {
-  min-width: 1rem;
+  min-width: 1.1rem;
   text-align: center;
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: var(--black);
 }
@@ -1258,7 +1268,7 @@ body {
 .history-items-table .starch-note,
 .history-items-table-edit .starch-note {
   display: block;
-  text-align: right;
+  text-align: center;
 }
 
 label {
@@ -1383,6 +1393,7 @@ select:disabled {
 .bill-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 0.88rem;
 }
 
@@ -1393,17 +1404,98 @@ select:disabled {
 
 .bill-table th {
   text-align: left;
-  padding: 0.65rem 0.6rem;
+  padding: 0.65rem 0.5rem;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
+  vertical-align: middle;
+}
+
+.bill-table th:nth-child(1),
+.bill-table td:nth-child(1) {
+  width: 2.75rem;
+  text-align: center;
+}
+
+.bill-table th:nth-child(2),
+.bill-table td:nth-child(2) {
+  width: 16%;
+}
+
+.bill-table th:nth-child(3),
+.bill-table td:nth-child(3) {
+  width: 20%;
+}
+
+.bill-table th:nth-child(4),
+.bill-table td:nth-child(4),
+.bill-table th:nth-child(5),
+.bill-table td:nth-child(5),
+.bill-table th:nth-child(6),
+.bill-table td:nth-child(6),
+.bill-table th:nth-child(7),
+.bill-table td:nth-child(7) {
+  text-align: center;
+}
+
+.bill-table th:nth-child(4),
+.bill-table td:nth-child(4) {
+  width: 13%;
+}
+
+.bill-table th:nth-child(5),
+.bill-table td:nth-child(5) {
+  width: 12%;
+}
+
+.bill-table th:nth-child(6),
+.bill-table td:nth-child(6) {
+  width: 11%;
+}
+
+.bill-table th:nth-child(7),
+.bill-table td:nth-child(7) {
+  width: 13%;
+}
+
+.bill-table th:nth-child(8),
+.bill-table td:nth-child(8) {
+  width: 2.5rem;
+  text-align: center;
+  padding-left: 0.25rem;
+  padding-right: 0.5rem;
 }
 
 .bill-table td {
-  padding: 0.6rem 0.6rem;
+  padding: 0.65rem 0.5rem;
   border-bottom: 1px solid var(--cream-dark);
   vertical-align: middle;
+}
+
+.bill-table td:nth-child(4) .qty-control,
+.bill-table td:nth-child(7) .starch-control {
+  justify-content: center;
+}
+
+.bill-table td:nth-child(3) {
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.bill-table td:nth-child(4),
+.bill-table td:nth-child(5),
+.bill-table td:nth-child(7) {
+  white-space: nowrap;
+}
+
+.bill-table td:nth-child(8) .btn-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 .bill-table tbody tr:hover {
@@ -1418,8 +1510,9 @@ select:disabled {
 }
 
 .qty-control {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
 }
 
@@ -1444,7 +1537,7 @@ select:disabled {
 }
 
 .qty-control span {
-  min-width: 24px;
+  min-width: 1.1rem;
   text-align: center;
   font-weight: 700;
 }

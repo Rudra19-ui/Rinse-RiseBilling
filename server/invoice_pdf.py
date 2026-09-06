@@ -18,10 +18,7 @@ LOGO_PATH = ROOT / "assets" / "logo.png"
 REVIEW_QR_PATH = ROOT / "assets" / "google-review-qr.jpg"
 INVOICE_DIR = invoice_dir()
 
-GOOGLE_REVIEW_URL = (
-    "https://google.com/maps/place//data=!4m3!3m2!1s0x3bae6d01fa8c4225:0x865cd70a4ba3ada4"
-    "!12e1?source=g.page.m.ia._&laa=nmx-review-solicitation-ia2"
-)
+GOOGLE_REVIEW_URL = "https://g.page/r/CaSto0sK11yGEAE/review"
 
 ORANGE = (242, 101, 34)
 ORANGE_DARK = (217, 84, 15)

@@ -222,8 +222,7 @@ async function withButtonLoading(btn, work, label = "Please wait…") {
 
 const IST_TIMEZONE = "Asia/Kolkata";
 
-const GOOGLE_REVIEW_URL =
-  "https://google.com/maps/place//data=!4m3!3m2!1s0x3bae6d01fa8c4225:0x865cd70a4ba3ada4!12e1?source=g.page.m.ia._&laa=nmx-review-solicitation-ia2";
+const GOOGLE_REVIEW_URL = "https://g.page/r/CaSto0sK11yGEAE/review";
 
 function googleReviewMessageBlock() {
   return `\n⭐ *Leave us a Google Review:*\n${GOOGLE_REVIEW_URL}`;
@@ -3128,6 +3127,7 @@ function buildBillMessage() {
   message += `Free Pickup & Delivery\n`;
   message += `Call: 9591506548 | 9 AM – 9 PM\n`;
   message += `Express 24-Hr Delivery`;
+  message += googleReviewMessageBlock();
 
   return message;
 }
@@ -4936,6 +4936,7 @@ function buildMessageFromRecord(bill) {
   message += `Thank you for choosing us!\n`;
   message += `Free Pickup & Delivery\n`;
   message += `Call: 9591506548 | 9 AM – 9 PM`;
+  message += googleReviewMessageBlock();
 
   return message;
 }
