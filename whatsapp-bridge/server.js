@@ -25,8 +25,10 @@ const WA_WEB_VERSION =
   process.env.WHATSAPP_WEB_VERSION || "2.3000.1046691727-alpha";
 
 const AUTH_READY_TIMEOUT_MS = Number(
-  process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 360000 : 180000)
+  process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 420000 : 180000)
 );
+const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 180000 : 90000));
+const CLIENT_ID = process.env.WHATSAPP_CLIENT_ID || "rinse-rise";
 
 const state = {
   ready: false,
@@ -48,6 +50,7 @@ let sendInProgress = false;
 const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
 const SESSION_LINKED_FILE = path.join(AUTH_DIR, ".session-linked");
 let lastReconnectAt = 0;
+let bridgeStartedAt = Date.now();
 
 function ensureAuthDirs() {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
@@ -417,7 +420,7 @@ function createClient() {
   // Always pin a known-good local WA Web HTML. Remote "latest" often authenticates
   // but never fires ready (breaks QR linking).
   const clientOptions = {
-    authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: "rinse-rise" }),
+    authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: CLIENT_ID }),
     puppeteer: puppeteerConfig,
     takeoverOnConflict: false,
     takeoverTimeoutMs: 0,
@@ -433,21 +436,35 @@ function createClient() {
 
 function bindClientEvents(waClient) {
   waClient.on("qr", async (qr) => {
+    const linked = hasSessionLinked();
+    const inRestoreGrace = linked && Date.now() - bridgeStartedAt < RESTORE_QR_GRACE_MS;
+
     state.ready = false;
-    state.phase = hasSessionLinked() ? "reconnecting" : "qr";
-    state.loadingPercent = 0;
-    state.lastError = hasSessionLinked()
-      ? "Session expired — scan QR once to link again, or wait while we retry restoring the saved session."
-      : null;
     state.authenticatingSince = null;
     clearTimeout(authTimer);
+
+    if (inRestoreGrace) {
+      state.phase = "restoring";
+      state.qr = null;
+      state.lastError =
+        "Restoring saved WhatsApp session — no scan needed. This can take 2–3 minutes on the server.";
+      console.log("[WhatsApp] QR during restore grace — keeping saved session, still restoring…");
+      startConnectedPoll(waClient);
+      return;
+    }
+
+    state.phase = linked ? "reconnecting" : "qr";
+    state.loadingPercent = 0;
+    state.lastError = linked
+      ? "Saved session expired — scan QR once to link again."
+      : null;
     try {
       state.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
     } catch (err) {
       state.lastError = "Could not render QR code.";
       console.error("[WhatsApp] QR render failed:", err.message);
     }
-    if (hasSessionLinked()) {
+    if (linked) {
       console.log("[WhatsApp] Saved session needs re-link — scan QR in the billing app.");
     } else {
       console.log("[WhatsApp] Scan QR code in the billing app to connect (one-time setup).");
@@ -555,6 +572,7 @@ async function destroyClient() {
 }
 
 async function initializeClient() {
+  bridgeStartedAt = Date.now();
   await destroyClient();
   client = createClient();
   bindClientEvents(client);
@@ -808,8 +826,47 @@ async function performSend(digits, message, filePath, filename) {
   throw lastErr || new Error("Failed to send on WhatsApp.");
 }
 
+async function performSendText(digits, message) {
+  await assertSendReady();
+
+  const targets = await resolveSendTargets(digits);
+  const text = String(message || "").trim();
+  if (!text) throw new Error("Message is required.");
+
+  let lastErr = null;
+  for (const chatId of targets) {
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      try {
+        await assertSendReady();
+        await ensureChatRegistered(chatId);
+        await client.sendMessage(chatId, text);
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (isLidError(err)) {
+          console.warn(`[WhatsApp] LID error on ${chatId} — trying alternate chat id…`);
+          break;
+        }
+        if (isCommsError(err) && attempt < 6) {
+          console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/6) — retrying…`);
+          await sleep(4000 * attempt);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  throw lastErr || new Error("Failed to send on WhatsApp.");
+}
+
 app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    ready: state.ready,
+    phase: state.phase,
+    sessionLinked: state.sessionLinked || hasSessionLinked(),
+  });
 });
 
 app.get("/status", (_req, res) => {
@@ -845,6 +902,60 @@ app.post("/reset", async (_req, res) => {
   } catch (err) {
     console.error("[WhatsApp] Reset failed:", err);
     res.status(500).json({ error: err.message || "Reset failed." });
+  }
+});
+
+app.post("/send-text", async (req, res) => {
+  if (sendInProgress) {
+    return res.status(429).json({ error: "Another WhatsApp send is in progress. Please wait a moment." });
+  }
+
+  if (!state.ready || !client) {
+    return res.status(503).json({
+      error: "WhatsApp not connected. Scan QR code in billing app.",
+      needsReconnect: true,
+    });
+  }
+
+  const { phone, message } = req.body || {};
+  const digits = normalizePhone(phone);
+  if (digits.length < 11) {
+    return res.status(400).json({ error: "Invalid phone number." });
+  }
+  if (!String(message || "").trim()) {
+    return res.status(400).json({ error: "Message is required." });
+  }
+
+  sendInProgress = true;
+  try {
+    try {
+      await performSendText(digits, message);
+      return res.json({ ok: true });
+    } catch (err) {
+      if (err.code === "NOT_ON_WHATSAPP") {
+        return res.status(400).json({ error: err.message });
+      }
+
+      if (isSessionError(err)) {
+        console.error("[WhatsApp] Send-text session error:", err.message);
+        const reconnected = await softRecoverClient(err.message);
+        if (!reconnected) {
+          return res.status(503).json({
+            error: "WhatsApp send layer not ready. Open WhatsApp in the billing app, wait until Ready, then try again.",
+            needsReconnect: true,
+          });
+        }
+        await performSendText(digits, message);
+        return res.json({ ok: true, recovered: true });
+      }
+
+      throw err;
+    }
+  } catch (err) {
+    console.error("[WhatsApp] Send-text failed:", err);
+    return res.status(500).json({ error: err.message || "Send failed." });
+  } finally {
+    sendInProgress = false;
   }
 });
 

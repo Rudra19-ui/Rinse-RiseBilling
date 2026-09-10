@@ -69,8 +69,11 @@ Look for:
 
 - Scan QR **once** after volume is mounted
 - Do **not** click Reset Connection unless needed
+- After deploy, wait **2–3 minutes** — status shows **Restoring saved session** (no scan needed)
+- Do **not** run **Start Billing.bat** on your PC at the same time as Railway — two bridges on the same WhatsApp account will kick each other off
 - One bridge runs in the container (no duplicate sessions)
 - Session files live in `/app/data/whatsapp-auth`
+- Service RAM: **at least 1 GB** (512 MB causes Chromium crashes → reconnect loops)
 
 ## Local development
 

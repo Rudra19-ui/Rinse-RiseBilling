@@ -21,7 +21,7 @@ BRIDGE_TIMEOUT = 60
 
 
 def _bridge_status_timeout() -> int:
-    return 4 if is_cloud_deployment() else 4
+    return 10 if is_cloud_deployment() else 4
 
 
 def is_cloud_deployment() -> bool:
@@ -211,7 +211,7 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
 
     status = get_bridge_status()
     if not status.get("ready") and status.get("sessionRestoring"):
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + (120 if is_cloud_deployment() else 60)
         while time.monotonic() < deadline:
             time.sleep(2)
             status = get_bridge_status(auto_start=True)
