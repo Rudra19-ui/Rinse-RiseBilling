@@ -224,6 +224,24 @@ const API = {
     });
   },
 
+  getUniqueCustomerPhones() {
+    return this.request("/api/customers/unique-phones");
+  },
+
+  async startOfferBroadcast(formData) {
+    const res = await fetch("/api/offers/broadcast", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Broadcast failed (${res.status})`);
+    return data;
+  },
+
+  getOfferBroadcastStatus(jobId) {
+    return this.request(`/api/offers/broadcast/${encodeURIComponent(jobId)}`);
+  },
+
   async fetchBillInvoicePdf(billId) {
     const res = await fetch(`/api/bills/${billId}/invoice.pdf`);
     if (!res.ok) {

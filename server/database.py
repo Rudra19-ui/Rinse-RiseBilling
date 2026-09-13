@@ -1063,6 +1063,38 @@ def migrate_from_local(payload: dict[str, Any]) -> dict[str, int]:
     return {"imported": imported, "billCounter": get_bill_counter()}
 
 
+def list_unique_customer_phones() -> list[dict[str, str]]:
+    """Unique 10-digit customer numbers from billing (no duplicates)."""
+    with get_connection() as conn:
+        customer_rows = conn.execute(
+            """
+            SELECT phone_key, name, phone FROM customers
+            WHERE phone_key IS NOT NULL AND length(phone_key) >= 10
+            """
+        ).fetchall()
+        bill_rows = conn.execute(
+            """
+            SELECT phone_key, customer_name AS name, customer_phone AS phone FROM bills
+            WHERE phone_key IS NOT NULL AND length(phone_key) >= 10
+            """
+        ).fetchall()
+
+    by_key: dict[str, dict[str, str]] = {}
+    for row in list(customer_rows) + list(bill_rows):
+        phone_key = normalize_phone_key(str(row["phone_key"] or row["phone"] or ""))
+        if len(phone_key) < 10:
+            continue
+        existing = by_key.get(phone_key)
+        name = str(row["name"] or "").strip()
+        phone = str(row["phone"] or phone_key).strip()
+        if not existing:
+            by_key[phone_key] = {"phoneKey": phone_key, "phone": phone, "name": name}
+        elif not existing.get("name") and name:
+            existing["name"] = name
+
+    return sorted(by_key.values(), key=lambda item: item["phoneKey"])
+
+
 def clear_all_data() -> dict[str, int]:
     """Remove all bills, customers, expenditures, and generated invoices."""
     from paths import invoice_dir

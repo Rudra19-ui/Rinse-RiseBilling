@@ -33,6 +33,7 @@ from database import (
     get_overall_stats,
     get_profit_loss_summary,
     init_db,
+    list_unique_customer_phones,
     migrate_from_local,
     normalize_phone_key,
     database_backend_name,
@@ -43,6 +44,7 @@ from database import (
     mark_bill_sent_via,
 )
 from invoice_pdf import build_whatsapp_message, generate_invoice_pdf, invoice_filename
+from offer_broadcast import get_broadcast_job, save_offer_image, start_offer_broadcast
 from offers import get_offers, save_offers
 from rates import get_rates, save_rates
 from whatsapp_send import (
@@ -65,6 +67,7 @@ _DB_API_PREFIXES = (
     "/api/expenditures",
     "/api/reports",
     "/api/migrate",
+    "/api/offers",
 )
 
 
@@ -396,6 +399,40 @@ def api_save_rates():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(rates)
+
+
+@app.route("/api/customers/unique-phones")
+def api_unique_customer_phones():
+    try:
+        customers = list_unique_customer_phones()
+    except Exception as exc:
+        return jsonify({"error": _friendly_db_error(exc)}), 503
+    return jsonify({"total": len(customers), "customers": customers})
+
+
+@app.route("/api/offers/broadcast", methods=["POST"])
+def api_start_offer_broadcast():
+    message = (request.form.get("message") or "").strip()
+    upload = request.files.get("image")
+    if not upload or not upload.filename:
+        return jsonify({"error": "Offer photo is required."}), 400
+    try:
+        image_path = save_offer_image(upload)
+        result = start_offer_broadcast(message, image_path)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Offer broadcast failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/offers/broadcast/<job_id>")
+def api_offer_broadcast_status(job_id: str):
+    job = get_broadcast_job(job_id)
+    if not job:
+        return jsonify({"error": "Broadcast job not found."}), 404
+    return jsonify(job)
 
 
 @app.route("/api/offers", methods=["GET"])

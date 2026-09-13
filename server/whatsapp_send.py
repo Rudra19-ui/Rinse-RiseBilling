@@ -268,3 +268,45 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
 def get_or_create_invoice_pdf(bill: dict[str, Any]) -> Path:
     """Always regenerate so WhatsApp/download PDFs match the latest template."""
     return generate_invoice_pdf(bill)
+
+
+def send_offer_image_whatsapp(phone: str, message: str, image_path: Path) -> dict[str, Any]:
+    digits = normalize_whatsapp_phone(phone)
+    if len(digits) < 12:
+        return {"sent": False, "reason": "invalid_phone", "error": "Invalid phone number."}
+
+    if not image_path.is_file():
+        return {"sent": False, "reason": "missing_image", "error": "Offer image not found."}
+
+    status = get_bridge_status()
+    if not status.get("ready"):
+        return {
+            "sent": False,
+            "reason": "not_connected",
+            "error": status.get("lastError") or "WhatsApp not connected.",
+        }
+
+    try:
+        result = _bridge_request(
+            "/send-image",
+            method="POST",
+            payload={
+                "phone": digits,
+                "message": message,
+                "imagePath": str(image_path.resolve()),
+                "filename": image_path.name,
+            },
+        )
+        return {
+            "sent": bool(result.get("ok")),
+            "reason": "sent" if result.get("ok") else "send_failed",
+            "error": result.get("error"),
+        }
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            err = json.loads(body)
+            error = err.get("error", body)
+        except json.JSONDecodeError:
+            error = body or str(exc)
+        return {"sent": False, "reason": "send_failed", "error": error}

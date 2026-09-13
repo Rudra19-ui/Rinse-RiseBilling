@@ -118,6 +118,19 @@ const els = {
   closeOffersModal: $("#closeOffersModal"),
   offersManageBtn: $("#offersManageBtn"),
   offersDoneManageBtn: $("#offersDoneManageBtn"),
+  offerSendBtn: $("#offerSendBtn"),
+  offerBroadcastModal: $("#offerBroadcastModal"),
+  offerBroadcastBackdrop: $("#offerBroadcastBackdrop"),
+  offerBroadcastForm: $("#offerBroadcastForm"),
+  offerImageInput: $("#offerImageInput"),
+  offerImagePreview: $("#offerImagePreview"),
+  offerMessageInput: $("#offerMessageInput"),
+  offerRecipientCount: $("#offerRecipientCount"),
+  offerBroadcastError: $("#offerBroadcastError"),
+  offerBroadcastProgress: $("#offerBroadcastProgress"),
+  offerBroadcastSubmit: $("#offerBroadcastSubmit"),
+  closeOfferBroadcast: $("#closeOfferBroadcast"),
+  cancelOfferBroadcast: $("#cancelOfferBroadcast"),
 };
 
 const EXPENDITURE_PASSWORD = "NihkilDada@22";
@@ -2598,6 +2611,141 @@ function closeOffersModal() {
   document.body.style.overflow = "";
   updateOffersManageControls();
   refreshOfferSelect();
+}
+
+let offerBroadcastPollTimer = null;
+
+function stopOfferBroadcastPoll() {
+  if (offerBroadcastPollTimer) {
+    clearInterval(offerBroadcastPollTimer);
+    offerBroadcastPollTimer = null;
+  }
+}
+
+function setOfferBroadcastError(message) {
+  if (!els.offerBroadcastError) return;
+  if (message) {
+    els.offerBroadcastError.textContent = message;
+    els.offerBroadcastError.classList.remove("hidden");
+  } else {
+    els.offerBroadcastError.textContent = "";
+    els.offerBroadcastError.classList.add("hidden");
+  }
+}
+
+function renderOfferBroadcastProgress(job) {
+  if (!els.offerBroadcastProgress) return;
+  const total = Number(job.total) || 0;
+  const done = Number(job.done) || 0;
+  const sent = Number(job.sent) || 0;
+  const failed = Number(job.failed) || 0;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  els.offerBroadcastProgress.classList.remove("hidden");
+  els.offerBroadcastProgress.innerHTML = `
+    <p><strong>${job.status === "complete" ? "Broadcast complete" : "Sending offers…"}</strong></p>
+    <div class="offer-progress-bar"><span style="width:${pct}%"></span></div>
+    <p>${done} / ${total} processed · ${sent} sent · ${failed} failed</p>
+  `;
+}
+
+async function pollOfferBroadcastJob(jobId) {
+  stopOfferBroadcastPoll();
+  offerBroadcastPollTimer = setInterval(async () => {
+    try {
+      const job = await API.getOfferBroadcastStatus(jobId);
+      renderOfferBroadcastProgress(job);
+      if (job.status === "complete") {
+        stopOfferBroadcastPoll();
+        if (els.offerBroadcastSubmit) els.offerBroadcastSubmit.disabled = false;
+        showWhatsAppToast(
+          `<strong>Offer broadcast finished</strong>${job.sent} sent, ${job.failed} failed (unique numbers only).`
+        );
+      }
+    } catch (err) {
+      stopOfferBroadcastPoll();
+      setOfferBroadcastError(err.message || "Could not read broadcast status.");
+      if (els.offerBroadcastSubmit) els.offerBroadcastSubmit.disabled = false;
+    }
+  }, 2000);
+}
+
+async function openOfferBroadcastModal() {
+  if (!els.offerBroadcastModal) return;
+  setOfferBroadcastError("");
+  if (els.offerBroadcastProgress) {
+    els.offerBroadcastProgress.classList.add("hidden");
+    els.offerBroadcastProgress.innerHTML = "";
+  }
+  if (els.offerBroadcastForm) els.offerBroadcastForm.reset();
+  if (els.offerImagePreview) {
+    els.offerImagePreview.classList.add("hidden");
+    els.offerImagePreview.innerHTML = "";
+  }
+  if (els.offerRecipientCount) els.offerRecipientCount.textContent = "Loading customer count…";
+  els.offerBroadcastModal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+
+  try {
+    const wa = await API.getWhatsAppStatus(true);
+    if (!wa.ready) {
+      setOfferBroadcastError(
+        "WhatsApp is not ready. Connect WhatsApp in the header first, then try again."
+      );
+    }
+    const data = await API.getUniqueCustomerPhones();
+    if (els.offerRecipientCount) {
+      els.offerRecipientCount.textContent = `${data.total} unique customer number${
+        data.total === 1 ? "" : "s"
+      } will receive this offer (duplicates removed).`;
+    }
+  } catch (err) {
+    if (els.offerRecipientCount) els.offerRecipientCount.textContent = "Could not load customer count.";
+    setOfferBroadcastError(err.message);
+  }
+}
+
+function closeOfferBroadcastModal() {
+  stopOfferBroadcastPoll();
+  if (!els.offerBroadcastModal) return;
+  els.offerBroadcastModal.classList.add("hidden");
+  document.body.style.overflow = "";
+  if (els.offerBroadcastSubmit) els.offerBroadcastSubmit.disabled = false;
+}
+
+async function handleOfferBroadcastSubmit(e) {
+  e.preventDefault();
+  setOfferBroadcastError("");
+  const file = els.offerImageInput?.files?.[0];
+  const message = els.offerMessageInput?.value?.trim() || "";
+  if (!file) {
+    setOfferBroadcastError("Please choose an offer photo.");
+    return;
+  }
+  if (!message) {
+    setOfferBroadcastError("Please write a message.");
+    return;
+  }
+  if (
+    !confirm(
+      "Send this offer to all unique billing customer numbers on WhatsApp? Each number gets only one message."
+    )
+  ) {
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("image", file);
+  formData.append("message", message);
+
+  if (els.offerBroadcastSubmit) els.offerBroadcastSubmit.disabled = true;
+  try {
+    const started = await API.startOfferBroadcast(formData);
+    renderOfferBroadcastProgress({ ...started, done: 0, sent: 0, failed: 0 });
+    await pollOfferBroadcastJob(started.jobId);
+  } catch (err) {
+    setOfferBroadcastError(err.message || "Could not start broadcast.");
+    if (els.offerBroadcastSubmit) els.offerBroadcastSubmit.disabled = false;
+  }
 }
 
 function formatDeliveryScheduleFromBill(bill) {
@@ -5355,6 +5503,18 @@ async function init() {
   els.offersDoneManageBtn?.addEventListener("click", exitOffersManageMode);
   els.closeOffersModal?.addEventListener("click", closeOffersModal);
   els.offersModalBackdrop?.addEventListener("click", closeOffersModal);
+  els.offerSendBtn?.addEventListener("click", openOfferBroadcastModal);
+  els.closeOfferBroadcast?.addEventListener("click", closeOfferBroadcastModal);
+  els.cancelOfferBroadcast?.addEventListener("click", closeOfferBroadcastModal);
+  els.offerBroadcastBackdrop?.addEventListener("click", closeOfferBroadcastModal);
+  els.offerBroadcastForm?.addEventListener("submit", handleOfferBroadcastSubmit);
+  els.offerImageInput?.addEventListener("change", () => {
+    const file = els.offerImageInput.files?.[0];
+    if (!file || !els.offerImagePreview) return;
+    const url = URL.createObjectURL(file);
+    els.offerImagePreview.innerHTML = `<img src="${url}" alt="Offer preview">`;
+    els.offerImagePreview.classList.remove("hidden");
+  });
   refreshWhatsAppStatus();
   if (isHostedDeployment()) {
     API.getWhatsAppStatus(true).catch(() => {});
@@ -5400,6 +5560,7 @@ async function init() {
       if (!els.whatsappConnectModal?.classList.contains("hidden")) closeWhatsAppConnectModal();
       if (!els.expenditurePasswordModal?.classList.contains("hidden")) closeExpenditurePasswordModal();
       if (!els.offersModal?.classList.contains("hidden")) closeOffersModal();
+      if (!els.offerBroadcastModal?.classList.contains("hidden")) closeOfferBroadcastModal();
       if (!$("#appAlertModal")?.classList.contains("hidden")) closeAppAlert();
     }
   });

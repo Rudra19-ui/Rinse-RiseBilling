@@ -860,6 +860,44 @@ async function performSendText(digits, message) {
   throw lastErr || new Error("Failed to send on WhatsApp.");
 }
 
+async function performSendImage(digits, message, filePath, filename) {
+  await assertSendReady();
+
+  const targets = await resolveSendTargets(digits);
+  const media = MessageMedia.fromFilePath(filePath);
+  media.filename = filename || path.basename(filePath);
+  const caption = String(message || "").trim();
+
+  let lastErr = null;
+  for (const chatId of targets) {
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      try {
+        await assertSendReady();
+        await ensureChatRegistered(chatId);
+        await client.sendMessage(chatId, media, {
+          caption,
+          sendMediaAsDocument: false,
+        });
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (isLidError(err)) {
+          console.warn(`[WhatsApp] LID error on ${chatId} — trying alternate chat id…`);
+          break;
+        }
+        if (isCommsError(err) && attempt < 6) {
+          console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/6) — retrying…`);
+          await sleep(4000 * attempt);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  throw lastErr || new Error("Failed to send image on WhatsApp.");
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -902,6 +940,44 @@ app.post("/reset", async (_req, res) => {
   } catch (err) {
     console.error("[WhatsApp] Reset failed:", err);
     res.status(500).json({ error: err.message || "Reset failed." });
+  }
+});
+
+app.post("/send-image", async (req, res) => {
+  if (sendInProgress) {
+    return res.status(429).json({ error: "Another WhatsApp send is in progress. Please wait a moment." });
+  }
+
+  if (!state.ready || !client) {
+    return res.status(503).json({
+      error: "WhatsApp not connected. Scan QR code in billing app.",
+      needsReconnect: true,
+    });
+  }
+
+  const { phone, message, imagePath, filename } = req.body || {};
+  const digits = normalizePhone(phone);
+  if (digits.length < 11) {
+    return res.status(400).json({ error: "Invalid phone number." });
+  }
+
+  const filePath = path.resolve(String(imagePath || ""));
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(400).json({ error: "Offer image file not found." });
+  }
+
+  sendInProgress = true;
+  try {
+    await performSendImage(digits, message, filePath, filename);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[WhatsApp] Send-image failed:", err);
+    return res.status(500).json({
+      error: err.message || "Failed to send image on WhatsApp.",
+      needsReconnect: isSessionError(err),
+    });
+  } finally {
+    sendInProgress = false;
   }
 });
 

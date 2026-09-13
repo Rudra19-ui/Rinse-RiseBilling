@@ -23,6 +23,10 @@ def invoice_dir() -> Path:
     return data_dir() / "invoices"
 
 
+def offers_dir() -> Path:
+    return data_dir() / "offers"
+
+
 def whatsapp_auth_dir() -> Path:
     custom = os.environ.get("WHATSAPP_AUTH_DIR", "").strip()
     if custom:
@@ -38,7 +42,7 @@ def whatsapp_cache_dir() -> Path:
 
 
 def ensure_data_dirs() -> None:
-    for path in (data_dir(), invoice_dir(), whatsapp_auth_dir(), whatsapp_cache_dir()):
+    for path in (data_dir(), invoice_dir(), offers_dir(), whatsapp_auth_dir(), whatsapp_cache_dir()):
         path.mkdir(parents=True, exist_ok=True)
 
 
