@@ -22,12 +22,14 @@ const IS_HOSTED = Boolean(
  * often never fires on multi-device WA Web — we treat CONNECTED state as ready.
  */
 const WA_WEB_VERSION =
-  process.env.WHATSAPP_WEB_VERSION || "2.3000.1046691727-alpha";
+  process.env.WHATSAPP_WEB_VERSION || "2.3000.1043441279-alpha";
+const BUNDLED_CACHE_DIR = path.join(__dirname, "wa-cache");
 
 const AUTH_READY_TIMEOUT_MS = Number(
   process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 420000 : 180000)
 );
-const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 180000 : 90000));
+const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 120000 : 60000));
+const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 240000 : 150000));
 const CLIENT_ID = process.env.WHATSAPP_CLIENT_ID || "rinse-rise";
 
 const state = {
@@ -39,10 +41,13 @@ const state = {
   authenticatingSince: null,
   waState: null,
   sessionLinked: false,
+  qrGeneration: 0,
 };
 
 let authTimer = null;
 let connectPollTimer = null;
+let restoreWatchdogTimer = null;
+let qrDuringRestoreCount = 0;
 let client = null;
 let recovering = false;
 let sendInProgress = false;
@@ -55,6 +60,54 @@ let bridgeStartedAt = Date.now();
 function ensureAuthDirs() {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   fs.mkdirSync(CACHE_DIR, { recursive: true });
+}
+
+/** Ship a pinned WA Web HTML in the repo so hosted deploys never fetch a broken remote build. */
+function ensureWaWebCache() {
+  ensureAuthDirs();
+  const target = path.join(CACHE_DIR, `${WA_WEB_VERSION}.html`);
+  if (fs.existsSync(target)) return;
+  const bundled = path.join(BUNDLED_CACHE_DIR, `${WA_WEB_VERSION}.html`);
+  if (fs.existsSync(bundled)) {
+    fs.copyFileSync(bundled, target);
+    console.log(`[WhatsApp] Seeded WA Web cache: ${WA_WEB_VERSION}`);
+  }
+}
+
+function clearRestoreWatchdog() {
+  if (restoreWatchdogTimer) {
+    clearTimeout(restoreWatchdogTimer);
+    restoreWatchdogTimer = null;
+  }
+}
+
+function scheduleRestoreWatchdog() {
+  clearRestoreWatchdog();
+  if (!hasSessionLinked()) return;
+  restoreWatchdogTimer = setTimeout(() => {
+    if (state.ready) return;
+    console.warn("[WhatsApp] Saved session did not restore in time — clearing for fresh QR…");
+    void forceFreshQrLink("restore-timeout");
+  }, RESTORE_FAIL_MS);
+}
+
+async function forceFreshQrLink(reason) {
+  clearRestoreWatchdog();
+  clearSessionLinked();
+  state.ready = false;
+  state.qr = null;
+  state.phase = "starting";
+  state.lastError = "Saved session expired — scan the QR code below to link WhatsApp again.";
+  qrDuringRestoreCount = 0;
+  console.warn("[WhatsApp] Forcing fresh QR link:", reason);
+  try {
+    await destroyClient();
+    await initializeClient();
+  } catch (err) {
+    state.phase = "error";
+    state.lastError = err.message || "Could not restart WhatsApp scanner.";
+    console.error("[WhatsApp] Fresh QR restart failed:", err.message);
+  }
 }
 
 /** Move session from old whatsapp-bridge/.wwebjs_auth to data/whatsapp-auth once. */
@@ -175,7 +228,10 @@ function clearConnectPoll() {
 function markReady(source) {
   clearTimeout(authTimer);
   clearConnectPoll();
+  clearRestoreWatchdog();
   state.qr = null;
+  state.qrGeneration = 0;
+  qrDuringRestoreCount = 0;
   state.lastError = null;
   state.loadingPercent = 100;
   state.phase = "connecting";
@@ -411,6 +467,7 @@ function createClient() {
       "--mute-audio",
       "--disable-extensions",
       "--disable-background-networking",
+      "--disable-blink-features=AutomationControlled",
     ],
   };
   if (CHROME_PATH) {
@@ -437,20 +494,26 @@ function createClient() {
 function bindClientEvents(waClient) {
   waClient.on("qr", async (qr) => {
     const linked = hasSessionLinked();
-    const inRestoreGrace = linked && Date.now() - bridgeStartedAt < RESTORE_QR_GRACE_MS;
+    const graceElapsed = Date.now() - bridgeStartedAt >= RESTORE_QR_GRACE_MS;
+    const inRestoreGrace = linked && !graceElapsed;
 
     state.ready = false;
     state.authenticatingSince = null;
     clearTimeout(authTimer);
 
     if (inRestoreGrace) {
-      state.phase = "restoring";
-      state.qr = null;
-      state.lastError =
-        "Restoring saved WhatsApp session — no scan needed. This can take 2–3 minutes on the server.";
-      console.log("[WhatsApp] QR during restore grace — keeping saved session, still restoring…");
-      startConnectedPoll(waClient);
-      return;
+      qrDuringRestoreCount += 1;
+      if (qrDuringRestoreCount === 1) {
+        state.phase = "restoring";
+        state.qr = null;
+        state.lastError =
+          "Restoring saved WhatsApp session — no scan needed. This can take 2–3 minutes on the server.";
+        console.log("[WhatsApp] QR during restore grace — waiting for saved session…");
+        startConnectedPoll(waClient);
+        return;
+      }
+      console.log("[WhatsApp] Repeated QR during restore — saved session expired, showing QR…");
+      clearSessionLinked();
     }
 
     state.phase = linked ? "reconnecting" : "qr";
@@ -459,7 +522,8 @@ function bindClientEvents(waClient) {
       ? "Saved session expired — scan QR once to link again."
       : null;
     try {
-      state.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
+      state.qrGeneration += 1;
+      state.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280, errorCorrectionLevel: "M" });
     } catch (err) {
       state.lastError = "Could not render QR code.";
       console.error("[WhatsApp] QR render failed:", err.message);
@@ -562,6 +626,7 @@ function scheduleReconnect(delayMs) {
 async function destroyClient() {
   clearTimeout(authTimer);
   clearConnectPoll();
+  clearRestoreWatchdog();
   if (!client) return;
   try {
     await client.destroy();
@@ -573,6 +638,8 @@ async function destroyClient() {
 
 async function initializeClient() {
   bridgeStartedAt = Date.now();
+  qrDuringRestoreCount = 0;
+  ensureWaWebCache();
   await destroyClient();
   client = createClient();
   bindClientEvents(client);
@@ -585,8 +652,11 @@ async function initializeClient() {
   state.authenticatingSince = null;
   state.waState = null;
   state.sessionLinked = linked;
+  state.qr = null;
+  state.qrGeneration = 0;
   if (linked) {
     console.log("[WhatsApp] Restoring saved session from disk…");
+    scheduleRestoreWatchdog();
   }
   await client.initialize();
 }
@@ -654,9 +724,12 @@ async function softRecoverClient(reason) {
 
 async function resetSession() {
   clearTimeout(scheduleReconnect._timer);
+  clearRestoreWatchdog();
   recovering = false;
+  qrDuringRestoreCount = 0;
   state.ready = false;
   state.qr = null;
+  state.qrGeneration = 0;
   state.lastError = null;
   state.phase = "starting";
   state.loadingPercent = 0;
@@ -929,6 +1002,7 @@ app.get("/status", (_req, res) => {
     authenticatingSeconds: authSeconds,
     sessionLinked: linked,
     sessionRestoring: restoring,
+    qrGeneration: state.qrGeneration,
     hosted: IS_HOSTED,
   });
 });

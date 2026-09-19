@@ -2932,6 +2932,7 @@ async function shareBillOnWhatsApp(phone, bill, { skipPaymentValidation = false 
 
 let whatsAppStatusTimer = null;
 let lastRenderedWhatsAppQr = null;
+let lastRenderedWhatsAppQrGen = 0;
 
 function isHostedDeployment() {
   const host = window.location.hostname.toLowerCase();
@@ -2948,6 +2949,7 @@ function isWhatsAppHosted(status) {
 }
 
 function isWhatsAppSessionRestoring(status) {
+  if (status?.qr || status?.phase === "qr") return false;
   return Boolean(
     status?.sessionRestoring ||
       (status?.sessionLinked &&
@@ -3117,6 +3119,37 @@ function renderWhatsAppConnectBody(status = null) {
     ? `<p class="wa-connect-error">${escapeHtml(status.lastError)}</p>`
     : "";
 
+  if (status?.qr) {
+    const qrGen = Number(status.qrGeneration) || 0;
+    if (
+      lastRenderedWhatsAppQr === status.qr &&
+      qrGen === lastRenderedWhatsAppQrGen &&
+      body.querySelector(".wa-qr-image")
+    ) {
+      if (errorHtml) {
+        const errEl = body.querySelector(".wa-connect-error");
+        if (errEl) errEl.textContent = status.lastError;
+      }
+      return;
+    }
+    lastRenderedWhatsAppQr = status.qr;
+    lastRenderedWhatsAppQrGen = qrGen;
+    const qrIntro = status.sessionLinked
+      ? "Your saved session expired. Scan once below to link again — after that, no repeat scans."
+      : "One-time setup: open WhatsApp on your phone → <strong>Linked Devices</strong> → <strong>Link a Device</strong>, then scan this QR.";
+    body.innerHTML = `
+      <p class="wa-connect-msg">${qrIntro}</p>
+      <div class="wa-qr-wrap">
+        <img class="wa-qr-image" src="${status.qr}" alt="WhatsApp QR code" width="280" height="280">
+      </div>
+      ${errorHtml}
+      <p class="wa-connect-hint">QR refreshes every ~20 seconds — keep this window open while scanning.<br>If linking fails, remove old linked devices on your phone, click Reset Connection, then scan again.</p>
+      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
+    `;
+    bindWhatsAppResetButton();
+    return;
+  }
+
   if (status?.phase === "loading" || status?.phase === "authenticating" || status?.phase === "restoring" || status?.phase === "reconnecting" || status?.phase === "starting") {
     lastRenderedWhatsAppQr = null;
     const hosted = isWhatsAppHosted(status);
@@ -3167,33 +3200,8 @@ function renderWhatsAppConnectBody(status = null) {
     return;
   }
 
-  if (status?.qr) {
-    if (lastRenderedWhatsAppQr === status.qr && body.querySelector(".wa-qr-image")) {
-      if (errorHtml) {
-        const errEl = body.querySelector(".wa-connect-error");
-        if (errEl) errEl.textContent = status.lastError;
-        else body.querySelector(".wa-connect-hint")?.insertAdjacentHTML("beforebegin", errorHtml);
-      }
-      return;
-    }
-    lastRenderedWhatsAppQr = status.qr;
-    const qrIntro = status.sessionLinked
-      ? "Your saved session expired. Scan once below to link again — after that, no repeat scans."
-      : "One-time setup: open WhatsApp on your phone → <strong>Linked Devices</strong> → <strong>Link a Device</strong>, then scan this QR.";
-    body.innerHTML = `
-      <p class="wa-connect-msg">${qrIntro}</p>
-      <div class="wa-qr-wrap">
-        <img class="wa-qr-image" src="${status.qr}" alt="WhatsApp QR code" width="280" height="280">
-      </div>
-      ${errorHtml}
-      <p class="wa-connect-hint">After linking, any phone or PC on this network can send bills — the server keeps the session.<br>QR refreshes every ~20 seconds. If linking fails, remove old devices on your phone, click Reset Connection, then scan again.</p>
-      <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
-    `;
-    bindWhatsAppResetButton();
-    return;
-  }
-
   lastRenderedWhatsAppQr = null;
+  lastRenderedWhatsAppQrGen = 0;
   const waitingHint = isWhatsAppSessionRestoring(status)
     ? "Restoring your saved WhatsApp session — no scan needed unless a QR appears."
     : isWhatsAppHosted(status)
@@ -3237,6 +3245,7 @@ async function bindWhatsAppStartButton(hosted = isHostedDeployment()) {
 async function resetWhatsAppConnection() {
   const btn = $("#whatsappResetBtn");
   lastRenderedWhatsAppQr = null;
+  lastRenderedWhatsAppQrGen = 0;
   try {
     await withButtonLoading(btn, async () => {
       await API.resetWhatsAppSession();
