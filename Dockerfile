@@ -4,8 +4,6 @@ FROM node:20-bookworm-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080 \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     WHATSAPP_BRIDGE_URL=http://127.0.0.1:3001 \
     WHATSAPP_BRIDGE_PORT=3001 \
     DATA_DIR=/app/data \
@@ -24,21 +22,27 @@ RUN apt-get update \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
-        chromium \
         ca-certificates \
         libnss3 \
+        libnspr4 \
         libatk1.0-0 \
         libatk-bridge2.0-0 \
         libcups2 \
         libdrm2 \
+        libdbus-1-3 \
+        libglib2.0-0 \
+        libgtk-3-0 \
         libxkbcommon0 \
         libxcomposite1 \
         libxdamage1 \
         libxfixes3 \
         libxrandr2 \
+        libxrender1 \
+        libxss1 \
         libgbm1 \
         libasound2 \
         libpango-1.0-0 \
+        libpangocairo-1.0-0 \
         libcairo2 \
         libx11-6 \
         libx11-xcb1 \

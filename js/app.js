@@ -3082,8 +3082,8 @@ function renderWhatsAppConnectBody(status = null) {
   if (!bridgeAvailable) {
     lastRenderedWhatsAppQr = null;
     const hostedHint = hosted
-      ? `<p class="wa-connect-hint">The QR scanner runs on this server. First start can take <strong>1–3 minutes</strong> while Chrome loads — keep this window open.</p>
-         <p class="wa-connect-hint">If no QR appears, click <strong>Retry Scanner</strong> and wait again.</p>`
+      ? `<p class="wa-connect-hint">The QR scanner runs on this server. First start can take <strong>60–90 seconds</strong> while Chrome loads — keep this window open.</p>
+         <p class="wa-connect-hint">If no QR after 2 minutes, click <strong>Reset Connection</strong> below, wait 90 seconds, then scan when QR appears.</p>`
       : `<ol class="wa-connect-steps">
           <li>Install <strong>Node.js</strong> from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> if not installed</li>
           <li>Close this page and restart <strong>Start Billing.bat</strong></li>
@@ -3098,8 +3098,10 @@ function renderWhatsAppConnectBody(status = null) {
       <p class="wa-connect-msg">${escapeHtml(msg)}</p>
       ${hostedHint}
       <button type="button" class="btn btn-primary wa-reset-btn" id="whatsappStartBridgeBtn">${hosted ? "Retry Scanner" : "Start WhatsApp Scanner"}</button>
+      ${hosted ? '<button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>' : ""}
     `;
     bindWhatsAppStartButton(hosted);
+    if (hosted) bindWhatsAppResetButton();
     return;
   }
 
@@ -3244,14 +3246,25 @@ async function bindWhatsAppStartButton(hosted = isHostedDeployment()) {
 
 async function resetWhatsAppConnection() {
   const btn = $("#whatsappResetBtn");
+  const hosted = isHostedDeployment();
   lastRenderedWhatsAppQr = null;
   lastRenderedWhatsAppQrGen = 0;
   try {
     await withButtonLoading(btn, async () => {
       await API.resetWhatsAppSession();
-      showWhatsAppToast("<strong>Connection reset</strong>Wait for a fresh QR code, then scan again.");
-      pollWhatsAppConnectModal();
-    }, "Resetting…");
+      showWhatsAppToast(
+        hosted
+          ? "<strong>Connection reset</strong>Scanner is restarting on the server. Keep this window open — QR usually appears in 60–90 seconds."
+          : "<strong>Connection reset</strong>Wait for a fresh QR code, then scan again."
+      );
+      renderWhatsAppConnectLoading();
+      for (let i = 0; i < (hosted ? 45 : 15); i += 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+        await pollWhatsAppConnectModal(true);
+        const qrVisible = $("#whatsappConnectBody")?.querySelector(".wa-qr-image");
+        if (qrVisible) break;
+      }
+    }, hosted ? "Resetting… (up to 90s)" : "Resetting…");
   } catch (err) {
     showWhatsAppToast(`<strong>Reset failed</strong>${escapeHtml(err.message || "Try restarting Start Billing.bat")}`);
   }

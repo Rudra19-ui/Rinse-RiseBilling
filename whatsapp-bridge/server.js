@@ -28,8 +28,9 @@ const BUNDLED_CACHE_DIR = path.join(__dirname, "wa-cache");
 const AUTH_READY_TIMEOUT_MS = Number(
   process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 420000 : 180000)
 );
-const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 120000 : 60000));
-const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 240000 : 150000));
+const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 45000 : 60000));
+const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 120000 : 150000));
+const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 90000 : 120000));
 const CLIENT_ID = process.env.WHATSAPP_CLIENT_ID || "rinse-rise";
 
 const state = {
@@ -47,6 +48,7 @@ const state = {
 let authTimer = null;
 let connectPollTimer = null;
 let restoreWatchdogTimer = null;
+let qrStartupTimer = null;
 let qrDuringRestoreCount = 0;
 let client = null;
 let recovering = false;
@@ -66,12 +68,33 @@ function ensureAuthDirs() {
 function ensureWaWebCache() {
   ensureAuthDirs();
   const target = path.join(CACHE_DIR, `${WA_WEB_VERSION}.html`);
-  if (fs.existsSync(target)) return;
   const bundled = path.join(BUNDLED_CACHE_DIR, `${WA_WEB_VERSION}.html`);
-  if (fs.existsSync(bundled)) {
+  if (!fs.existsSync(bundled)) {
+    console.warn(`[WhatsApp] Bundled WA Web HTML missing: ${bundled}`);
+    return;
+  }
+  const needsCopy =
+    !fs.existsSync(target) || fs.statSync(bundled).size !== fs.statSync(target).size;
+  if (needsCopy) {
     fs.copyFileSync(bundled, target);
     console.log(`[WhatsApp] Seeded WA Web cache: ${WA_WEB_VERSION}`);
   }
+}
+
+function clearQrStartupWatchdog() {
+  if (qrStartupTimer) {
+    clearTimeout(qrStartupTimer);
+    qrStartupTimer = null;
+  }
+}
+
+function scheduleQrStartupWatchdog() {
+  clearQrStartupWatchdog();
+  qrStartupTimer = setTimeout(() => {
+    if (state.ready || state.qr) return;
+    console.warn("[WhatsApp] No QR generated yet — clearing session and retrying…");
+    void forceFreshQrLink("qr-startup-timeout");
+  }, QR_STARTUP_TIMEOUT_MS);
 }
 
 function clearRestoreWatchdog() {
@@ -97,11 +120,18 @@ async function forceFreshQrLink(reason) {
   state.ready = false;
   state.qr = null;
   state.phase = "starting";
-  state.lastError = "Saved session expired — scan the QR code below to link WhatsApp again.";
+  state.lastError =
+    reason === "qr-startup-timeout"
+      ? "Generating a fresh QR code — scan below when it appears."
+      : "Saved session expired — scan the QR code below to link WhatsApp again.";
   qrDuringRestoreCount = 0;
   console.warn("[WhatsApp] Forcing fresh QR link:", reason);
   try {
     await destroyClient();
+    if (reason === "qr-startup-timeout" || reason === "restore-timeout") {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
+    }
     await initializeClient();
   } catch (err) {
     state.phase = "error";
@@ -187,9 +217,22 @@ function releaseSingleInstanceLock() {
   }
 }
 
-/** Prefer system Chrome/Edge on Windows — more reliable than bundled Chromium for WA Web. */
+/** Hosted: Puppeteer bundled Chrome. Local Windows: system Chrome/Edge. */
 function resolveChromePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+  if (IS_HOSTED) {
+    try {
+      const puppeteer = require("puppeteer");
+      const bundled = puppeteer.executablePath();
+      if (bundled && fs.existsSync(bundled)) return bundled;
+    } catch (err) {
+      console.warn("[WhatsApp] Puppeteer bundled Chrome lookup:", err.message);
+    }
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || "";
+    if (envPath && fs.existsSync(envPath)) return envPath;
+    return "";
+  }
+
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
   const candidates = [
@@ -229,6 +272,7 @@ function markReady(source) {
   clearTimeout(authTimer);
   clearConnectPoll();
   clearRestoreWatchdog();
+  clearQrStartupWatchdog();
   state.qr = null;
   state.qrGeneration = 0;
   qrDuringRestoreCount = 0;
@@ -522,6 +566,7 @@ function bindClientEvents(waClient) {
       ? "Saved session expired — scan QR once to link again."
       : null;
     try {
+      clearQrStartupWatchdog();
       state.qrGeneration += 1;
       state.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280, errorCorrectionLevel: "M" });
     } catch (err) {
@@ -627,6 +672,7 @@ async function destroyClient() {
   clearTimeout(authTimer);
   clearConnectPoll();
   clearRestoreWatchdog();
+  clearQrStartupWatchdog();
   if (!client) return;
   try {
     await client.destroy();
@@ -658,7 +704,15 @@ async function initializeClient() {
     console.log("[WhatsApp] Restoring saved session from disk…");
     scheduleRestoreWatchdog();
   }
-  await client.initialize();
+  scheduleQrStartupWatchdog();
+  try {
+    await client.initialize();
+  } catch (err) {
+    state.phase = "error";
+    state.lastError = `Scanner failed to start: ${err.message}. Click Reset Connection and wait for a fresh QR.`;
+    console.error("[WhatsApp] initialize() failed:", err.message);
+    throw err;
+  }
 }
 
 function waitForReady(timeoutMs) {

@@ -167,24 +167,62 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
 
         auth_dir = whatsapp_auth_dir()
         session_linked = (auth_dir / ".session-linked").is_file()
+        log_tail = read_bridge_log_tail() if hosted else ""
+        bridge_hint = "Scanner is starting on the server — wait 60–90 seconds."
+        if "initialize() failed" in log_tail or "Init failed" in log_tail:
+            bridge_hint = "Scanner failed to start — click Reset Connection, wait 90 seconds, then scan the QR."
+        elif session_linked:
+            bridge_hint = "Restoring saved session — wait up to 2 minutes, or click Reset Connection for a fresh QR."
         return {
             "available": False,
             "ready": False,
             "qr": None,
-            "lastError": (
-                "Restoring saved WhatsApp session on server — wait 1–3 minutes, then click Retry."
-                if hosted and session_linked
-                else "Starting WhatsApp scanner — QR code will appear shortly. Wait 1–2 minutes and click Retry."
-                if hosted
-                else None
-            ),
+            "lastError": bridge_hint if hosted else None,
             "phase": "restoring" if hosted and session_linked else "starting",
             "sessionLinked": session_linked,
             "sessionRestoring": session_linked,
             "sessionLocked": session_linked,
+            "bridgeLogTail": log_tail[-1200:] if log_tail else None,
             "hosted": hosted,
             "enabled": True,
         }
+
+
+def _clear_local_whatsapp_session() -> None:
+    import shutil
+
+    from paths import whatsapp_auth_dir
+
+    auth_dir = whatsapp_auth_dir()
+    shutil.rmtree(auth_dir, ignore_errors=True)
+    auth_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _request_bridge_restart() -> None:
+    from paths import whatsapp_auth_dir
+
+    auth_dir = whatsapp_auth_dir()
+    auth_dir.mkdir(parents=True, exist_ok=True)
+    lock = auth_dir / ".bridge.lock"
+    flag = auth_dir / ".bridge-restart-requested"
+    try:
+        lock.unlink(missing_ok=True)
+        flag.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def read_bridge_log_tail(*, max_lines: int = 40) -> str:
+    from paths import data_dir
+
+    log_path = data_dir() / "whatsapp-bridge.log"
+    if not log_path.is_file():
+        return ""
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(lines[-max_lines:])
+    except OSError:
+        return ""
 
 
 def reset_bridge_session(*, force: bool = False) -> dict[str, Any]:
@@ -197,8 +235,14 @@ def reset_bridge_session(*, force: bool = False) -> dict[str, Any]:
             return {"ok": False, **err}
         except json.JSONDecodeError:
             return {"ok": False, "error": body or str(exc)}
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        return {"ok": False, "error": str(exc)}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        _clear_local_whatsapp_session()
+        _request_bridge_restart()
+        return {
+            "ok": True,
+            "restarted": True,
+            "message": "WhatsApp scanner is restarting — wait 60–90 seconds for a fresh QR code.",
+        }
 
 
 def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:

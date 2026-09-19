@@ -13,7 +13,8 @@ touch "$DATA/.persistent_volume" 2>/dev/null || true
 # Stale lock from a previous container must not block startup
 rm -f "$WA_AUTH/.bridge.lock" 2>/dev/null || true
 
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1024}"
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
+export RAILWAY_ENVIRONMENT="${RAILWAY_ENVIRONMENT:-1}"
 export WHATSAPP_CLIENT_ID="${WHATSAPP_CLIENT_ID:-rinse-rise}"
 export WHATSAPP_AUTH_DIR="$WA_AUTH"
 export WHATSAPP_CACHE_DIR="$WA_CACHE"
@@ -34,8 +35,14 @@ start_bridge_background() {
     cd /app/whatsapp-bridge
     backoff=5
     while true; do
+      if [ -f "$WA_AUTH/.bridge-restart-requested" ]; then
+        rm -f "$WA_AUTH/.bridge-restart-requested" "$WA_AUTH/.bridge.lock" 2>/dev/null || true
+        pkill -f "node server.js" 2>/dev/null || true
+        sleep 2
+      fi
+
       if bridge_healthy; then
-        sleep 30
+        sleep 15
         continue
       fi
 
