@@ -375,6 +375,16 @@ function isLidError(err) {
   return msg.includes("lid is missing") || msg.includes("no lid for user");
 }
 
+function isContactGetterError(err) {
+  const msg = String(err?.message || err).toLowerCase();
+  return (
+    msg.includes("data passed to getter") ||
+    msg.includes("memoize") ||
+    msg.includes("getcontact") ||
+    (msg.includes("evaluation failed") && msg.includes("undefined"))
+  );
+}
+
 function isSessionError(err) {
   const msg = String(err?.message || err).toLowerCase();
   return (
@@ -844,16 +854,14 @@ function serializeWid(wid) {
 }
 
 async function ensureChatRegistered(chatId) {
-  if (!client?.pupPage) return false;
+  if (!client?.pupPage || !chatId || chatId.includes("@lid")) return false;
   try {
     return await client.pupPage.evaluate(async (targetChatId) => {
       const widFactory = window.require("WAWebWidFactory");
       const chatWid = widFactory.createWid(targetChatId);
-      const exists = await window.require("WAWebQueryExistsJob").queryWidExists(chatWid);
-      const resolvedWid = exists?.wid || chatWid;
       const chat =
-        window.require("WAWebCollections").Chat.get(resolvedWid) ||
-        (await window.require("WAWebFindChatAction").findOrCreateLatestChat(resolvedWid))?.chat;
+        window.require("WAWebCollections").Chat.get(chatWid) ||
+        (await window.require("WAWebFindChatAction").findOrCreateLatestChat(chatWid))?.chat;
       return Boolean(chat);
     }, chatId);
   } catch (err) {
@@ -862,42 +870,32 @@ async function ensureChatRegistered(chatId) {
   }
 }
 
+/** Phone-only chat IDs — avoid @lid lookups that trigger WhatsApp Web getter crashes. */
 async function resolveSendTargets(digits) {
   const phoneChatId = `${digits}@c.us`;
-  const registered = await client.getNumberId(digits);
-  if (!registered) {
+  let registeredId = null;
+
+  try {
+    const registered = await client.getNumberId(digits);
+    registeredId = serializeWid(registered);
+  } catch (err) {
+    console.warn("[WhatsApp] getNumberId failed:", err.message);
+  }
+
+  if (!registeredId) {
     const err = new Error("This phone number is not registered on WhatsApp.");
     err.code = "NOT_ON_WHATSAPP";
     throw err;
   }
 
-  const registeredId = serializeWid(registered) || phoneChatId;
-  const targets = new Set([registeredId, phoneChatId]);
-
-  try {
-    const mappings = await client.getContactLidAndPhone([phoneChatId, registeredId]);
-    for (const entry of mappings || []) {
-      if (entry?.pn) targets.add(entry.pn);
-      if (entry?.lid) targets.add(entry.lid);
-    }
-  } catch (err) {
-    console.warn("[WhatsApp] LID lookup:", err.message);
-  }
-
-  const ordered = [...targets];
-  for (const chatId of ordered) {
-    await ensureChatRegistered(chatId);
-    try {
-      if (await isWhatsAppStoreReady()) {
-        await client.getChatById(chatId);
-      }
-    } catch {
-      /* chat may still send on next step */
-    }
-  }
-
-  return ordered;
+  const targets = [];
+  if (registeredId !== phoneChatId) targets.push(registeredId);
+  targets.push(phoneChatId);
+  return targets;
 }
+
+const SEND_OPTIONS = { sendSeen: false, sendMediaAsDocument: true };
+const SEND_IMAGE_OPTIONS = { sendSeen: false, sendMediaAsDocument: false };
 
 async function assertSendReady() {
   if (!client) throw new Error("WhatsApp not connected.");
@@ -948,14 +946,14 @@ async function performSend(digits, message, filePath, filename) {
         await assertSendReady();
         await ensureChatRegistered(chatId);
         await client.sendMessage(chatId, media, {
+          ...SEND_OPTIONS,
           caption: message || "",
-          sendMediaAsDocument: true,
         });
         return;
       } catch (err) {
         lastErr = err;
-        if (isLidError(err)) {
-          console.warn(`[WhatsApp] LID error on ${chatId} — trying alternate chat id…`);
+        if (isLidError(err) || isContactGetterError(err)) {
+          console.warn(`[WhatsApp] Contact/LID error on ${chatId} — trying alternate chat id…`);
           break;
         }
         if (isCommsError(err) && attempt < 6) {
@@ -984,12 +982,12 @@ async function performSendText(digits, message) {
       try {
         await assertSendReady();
         await ensureChatRegistered(chatId);
-        await client.sendMessage(chatId, text);
+        await client.sendMessage(chatId, text, { sendSeen: false });
         return;
       } catch (err) {
         lastErr = err;
-        if (isLidError(err)) {
-          console.warn(`[WhatsApp] LID error on ${chatId} — trying alternate chat id…`);
+        if (isLidError(err) || isContactGetterError(err)) {
+          console.warn(`[WhatsApp] Contact/LID error on ${chatId} — trying alternate chat id…`);
           break;
         }
         if (isCommsError(err) && attempt < 6) {
@@ -1020,14 +1018,14 @@ async function performSendImage(digits, message, filePath, filename) {
         await assertSendReady();
         await ensureChatRegistered(chatId);
         await client.sendMessage(chatId, media, {
+          ...SEND_IMAGE_OPTIONS,
           caption,
-          sendMediaAsDocument: false,
         });
         return;
       } catch (err) {
         lastErr = err;
-        if (isLidError(err)) {
-          console.warn(`[WhatsApp] LID error on ${chatId} — trying alternate chat id…`);
+        if (isLidError(err) || isContactGetterError(err)) {
+          console.warn(`[WhatsApp] Contact/LID error on ${chatId} — trying alternate chat id…`);
           break;
         }
         if (isCommsError(err) && attempt < 6) {

@@ -62,6 +62,8 @@ RUN cd whatsapp-bridge && npm ci --omit=dev \
 
 COPY . .
 
+RUN cd whatsapp-bridge && node patch-wwebjs.js
+
 RUN mkdir -p /app/data/invoices /app/data/whatsapp-auth /app/data/whatsapp-cache \
     && sed -i 's/\r$//' docker-entrypoint.sh \
     && chmod +x docker-entrypoint.sh
