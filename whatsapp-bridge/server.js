@@ -54,8 +54,8 @@ let client = null;
 let recovering = false;
 let sendInProgress = false;
 let sendInProgressSince = 0;
-const SEND_LOCK_MAX_MS = Number(process.env.WHATSAPP_SEND_LOCK_MS || 90000);
-const SEND_OPERATION_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 75000);
+const SEND_LOCK_MAX_MS = Number(process.env.WHATSAPP_SEND_LOCK_MS || 60000);
+const SEND_OPERATION_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 55000);
 
 const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
 const SESSION_LINKED_FILE = path.join(AUTH_DIR, ".session-linked");
@@ -401,12 +401,22 @@ function releaseSendLock() {
 }
 
 function sendBusyResponse(res) {
+  clearSendLockIfStale();
+  if (!sendInProgress) {
+    return res.status(503).json({
+      error: "WhatsApp send slot was busy but is free now — please try again.",
+      retryAfterSec: 1,
+    });
+  }
   const busyForSec = sendInProgressSince
     ? Math.max(1, Math.ceil((Date.now() - sendInProgressSince) / 1000))
     : 0;
   return res.status(429).json({
-    error: "Another WhatsApp send is in progress. Please wait a moment.",
-    retryAfterSec: 5,
+    error:
+      busyForSec >= 8
+        ? "WhatsApp is still sending the previous message — wait a few seconds and try again."
+        : "Another WhatsApp send is in progress. Please wait a moment.",
+    retryAfterSec: Math.min(8, Math.max(2, 6 - busyForSec)),
     busyForSec,
   });
 }
@@ -891,6 +901,7 @@ async function softRecoverClient(reason) {
 async function resetSession() {
   clearTimeout(scheduleReconnect._timer);
   clearRestoreWatchdog();
+  releaseSendLock();
   recovering = false;
   qrDuringRestoreCount = 0;
   state.ready = false;
@@ -963,7 +974,7 @@ async function resolveSendTargets(digits) {
 const SEND_OPTIONS = { sendSeen: false, sendMediaAsDocument: true };
 const SEND_IMAGE_OPTIONS = { sendSeen: false, sendMediaAsDocument: false };
 
-async function assertSendReady() {
+async function assertSendReady({ maxCommsWaitMs = 8000 } = {}) {
   if (!client) throw new Error("WhatsApp not connected.");
   const waState = await client.getState();
   if (waState !== "CONNECTED") {
@@ -985,21 +996,21 @@ async function assertSendReady() {
   if (!(await isCommsReady())) {
     state.ready = false;
     state.phase = "loading";
-    state.lastError = "WhatsApp is still connecting. Wait 30 seconds and try again.";
-    const commsOk = await waitForCommsReady(30000);
+    state.lastError = "WhatsApp is still connecting. Wait a few seconds and try again.";
+    const commsOk = maxCommsWaitMs > 0 ? await waitForCommsReady(maxCommsWaitMs) : false;
     if (!commsOk) {
       const err = new Error(
-        "WhatsApp is still starting its send layer. Wait about 30 seconds, then try again."
+        "WhatsApp is still starting its send layer. Wait a few seconds, then try again."
       );
       err.code = "COMMS_NOT_READY";
       throw err;
     }
-    await sleep(2000);
+    await sleep(1000);
   }
 }
 
 async function performSend(digits, message, filePath, filename) {
-  await assertSendReady();
+  await assertSendReady({ maxCommsWaitMs: 8000 });
 
   const targets = await resolveSendTargets(digits);
   const media = MessageMedia.fromFilePath(filePath);
@@ -1009,7 +1020,7 @@ async function performSend(digits, message, filePath, filename) {
   for (const chatId of targets) {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        await assertSendReady();
+        if (attempt > 1) await assertSendReady({ maxCommsWaitMs: 2000 });
         await ensureChatRegistered(chatId);
         await client.sendMessage(chatId, media, {
           ...SEND_OPTIONS,
@@ -1036,7 +1047,7 @@ async function performSend(digits, message, filePath, filename) {
 }
 
 async function performSendText(digits, message) {
-  await assertSendReady();
+  await assertSendReady({ maxCommsWaitMs: 8000 });
 
   const targets = await resolveSendTargets(digits);
   const text = String(message || "").trim();
@@ -1046,7 +1057,7 @@ async function performSendText(digits, message) {
   for (const chatId of targets) {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        await assertSendReady();
+        if (attempt > 1) await assertSendReady({ maxCommsWaitMs: 2000 });
         await ensureChatRegistered(chatId);
         await client.sendMessage(chatId, text, { sendSeen: false });
         return;
@@ -1070,7 +1081,7 @@ async function performSendText(digits, message) {
 }
 
 async function performSendImage(digits, message, filePath, filename) {
-  await assertSendReady();
+  await assertSendReady({ maxCommsWaitMs: 8000 });
 
   const targets = await resolveSendTargets(digits);
   const media = MessageMedia.fromFilePath(filePath);
@@ -1081,7 +1092,7 @@ async function performSendImage(digits, message, filePath, filename) {
   for (const chatId of targets) {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        await assertSendReady();
+        if (attempt > 1) await assertSendReady({ maxCommsWaitMs: 2000 });
         await ensureChatRegistered(chatId);
         await client.sendMessage(chatId, media, {
           ...SEND_IMAGE_OPTIONS,
@@ -1108,15 +1119,18 @@ async function performSendImage(digits, message, filePath, filename) {
 }
 
 app.get("/health", (_req, res) => {
+  clearSendLockIfStale();
   res.json({
     ok: true,
     ready: state.ready,
     phase: state.phase,
     sessionLinked: state.sessionLinked || hasSessionLinked(),
+    sendInProgress,
   });
 });
 
 app.get("/status", (_req, res) => {
+  clearSendLockIfStale();
   const authSeconds = state.authenticatingSince
     ? Math.floor((Date.now() - state.authenticatingSince) / 1000)
     : 0;

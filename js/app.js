@@ -733,24 +733,36 @@ function isWhatsAppReconnectError(message) {
 }
 
 function isWhatsAppSendBusyError(message) {
-  return /another whatsapp send is in progress|send is in progress/i.test(String(message || ""));
+  return /another whatsapp send is in progress|send is in progress|still sending the previous|already sending another invoice/i.test(
+    String(message || "")
+  );
 }
 
-async function sendBillWhatsAppWithRetry(billId, options = {}, attempts = 4) {
-  let lastError = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      return await API.sendBillWhatsApp(billId, options);
-    } catch (err) {
-      lastError = err;
-      if (isWhatsAppSendBusyError(err.message) && attempt < attempts - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 4000));
-        continue;
-      }
-      throw err;
-    }
+let whatsAppSendInFlight = false;
+
+async function sendBillWhatsAppWithRetry(billId, options = {}, attempts = 8) {
+  if (whatsAppSendInFlight) {
+    throw new Error("WhatsApp is already sending another invoice — please wait a few seconds.");
   }
-  throw lastError || new Error("Could not send on WhatsApp.");
+  whatsAppSendInFlight = true;
+  let lastError = null;
+  try {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await API.sendBillWhatsApp(billId, options);
+      } catch (err) {
+        lastError = err;
+        if (isWhatsAppSendBusyError(err.message) && attempt < attempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 5000 + attempt * 1000));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError || new Error("Could not send on WhatsApp.");
+  } finally {
+    whatsAppSendInFlight = false;
+  }
 }
 
 let appAlertSecondaryHandler = null;

@@ -295,7 +295,7 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
 
     last_error = "Failed to send on WhatsApp."
     needs_reconnect = False
-    for attempt in range(4):
+    for attempt in range(8):
         try:
             result = _bridge_request(
                 "/send",
@@ -315,15 +315,17 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
             }
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
+            retry_after = 5
             try:
                 err = json.loads(body)
                 last_error = err.get("error", body)
                 needs_reconnect = bool(err.get("needsReconnect"))
+                retry_after = int(err.get("retryAfterSec") or retry_after)
             except json.JSONDecodeError:
                 last_error = body or str(exc)
                 needs_reconnect = "detached frame" in last_error.lower()
-            if exc.code == 429 and attempt < 3:
-                time.sleep(4)
+            if exc.code in (429, 503) and attempt < 7:
+                time.sleep(max(2, min(retry_after, 8)))
                 continue
             break
         except (urllib.error.URLError, TimeoutError) as exc:
