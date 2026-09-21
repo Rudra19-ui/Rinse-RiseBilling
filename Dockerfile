@@ -56,13 +56,14 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
 COPY whatsapp-bridge/package.json whatsapp-bridge/package-lock.json ./whatsapp-bridge/
-RUN cd whatsapp-bridge && npm ci --omit=dev \
+RUN cd whatsapp-bridge && npm ci --omit=dev --ignore-scripts \
     && npx puppeteer browsers install chrome \
     && node -e "const p=require('puppeteer'); const fs=require('fs'); const e=p.executablePath(); if(!fs.existsSync(e)) { console.error('Chrome missing:', e); process.exit(1); } console.log('Chrome OK:', e);"
 
-COPY . .
-
+COPY whatsapp-bridge/patch-wwebjs.js ./whatsapp-bridge/
 RUN cd whatsapp-bridge && node patch-wwebjs.js
+
+COPY . .
 
 RUN mkdir -p /app/data/invoices /app/data/whatsapp-auth /app/data/whatsapp-cache \
     && sed -i 's/\r$//' docker-entrypoint.sh \

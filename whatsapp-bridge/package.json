@@ -5,8 +5,7 @@
   "description": "Local WhatsApp bridge for sending invoice PDFs",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "node patch-wwebjs.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.21.2",

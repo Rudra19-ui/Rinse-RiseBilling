@@ -3339,7 +3339,10 @@ function getSentViaLabel(sentVia) {
   return "Printed";
 }
 
-function buildCurrentBillPayload(sentVia) {
+function buildCurrentBillPayload(
+  sentVia,
+  { deliveryStatus = "pending", completedAt = null } = {}
+) {
   const modes = getNormalizedServiceModes();
   return {
     billNo: String(billCounter).padStart(4, "0"),
@@ -3360,15 +3363,20 @@ function buildCurrentBillPayload(sentVia) {
     total: getTotal(),
     ...getSelectedOfferPayload(),
     sentVia,
-    deliveryStatus: "pending",
-    completedAt: null,
+    deliveryStatus,
+    completedAt,
   };
 }
 
-async function saveBillToDatabase(sentVia, { refreshHistory = true } = {}) {
+async function saveBillToDatabase(
+  sentVia,
+  { refreshHistory = true, deliveryStatus = "pending", completedAt = null } = {}
+) {
   if (billItems.length === 0) return null;
   if (!validateCustomerRequired()) return null;
-  const saved = await API.createBill(buildCurrentBillPayload(sentVia));
+  const saved = await API.createBill(
+    buildCurrentBillPayload(sentVia, { deliveryStatus, completedAt })
+  );
   if (saved?.billNo) {
     const parsed = parseInt(String(saved.billNo).replace(/\D/g, ""), 10);
     if (!Number.isNaN(parsed)) billCounter = parsed + 1;
@@ -5375,7 +5383,55 @@ function buildReceipt() {
 }
 
 async function sendWhatsApp() {
-  showWhatsAppValidationAlert(getWhatsAppDeliveryBlockMessage({ fromBilling: true }));
+  if (billItems.length === 0) return;
+  if (!validateCustomerRequired()) return;
+
+  const phone = formatPhoneForWhatsApp(els.customerPhone.value.trim());
+  if (phone.length < 12) {
+    showAppAlert({
+      title: "Phone number required",
+      message: "Enter a valid 10-digit customer phone number before sending on WhatsApp.",
+      variant: "warning",
+    });
+    return;
+  }
+
+  const missing = getWhatsAppPaymentMissing(getPaymentType(), getPaymentInfo());
+  if (missing.length) {
+    showWhatsAppValidationAlert(getWhatsAppPaymentBlockMessage(missing));
+    return;
+  }
+
+  try {
+    await withButtonLoading(els.whatsappBtn, async () => {
+      setSectionLoading(els.billingView, true, "Saving & sending on WhatsApp…");
+      try {
+        buildReceipt();
+        const saved = await saveBillToDatabase("whatsapp", {
+          refreshHistory: true,
+          deliveryStatus: "done",
+          completedAt: new Date().toISOString(),
+        });
+        if (!saved?.id) return;
+
+        const sent = await shareBillOnWhatsApp(phone, saved, { skipPaymentValidation: true });
+        if (sent) {
+          resetBillForm();
+        }
+      } finally {
+        setSectionLoading(els.billingView, false);
+      }
+    }, "Sending…");
+  } catch (err) {
+    const block = parseWhatsAppSendError(err.message);
+    if (block) {
+      showWhatsAppValidationAlert(block);
+      return;
+    }
+    showWhatsAppToast(
+      `<strong>Could not send on WhatsApp</strong>${escapeHtml(err.message || "Try again.")}`
+    );
+  }
 }
 
 async function printReceipt() {
