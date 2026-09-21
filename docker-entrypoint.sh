@@ -75,15 +75,15 @@ start_bridge_background() {
 start_bridge_background
 
 if [ "${WHATSAPP_ENABLED:-1}" != "0" ]; then
-  echo "Waiting for WhatsApp bridge to start..."
+  echo "WhatsApp bridge starting in background (web app starts immediately)..."
   waited=0
-  while [ "$waited" -lt 90 ]; do
+  while [ "$waited" -lt 12 ]; do
     if bridge_healthy; then
-      echo "WhatsApp bridge is up (session restores automatically if already linked)."
+      echo "WhatsApp bridge is up."
       break
     fi
-    sleep 2
-    waited=$((waited + 2))
+    sleep 1
+    waited=$((waited + 1))
   done
 fi
 

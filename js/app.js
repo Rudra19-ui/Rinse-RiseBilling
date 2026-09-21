@@ -3108,8 +3108,8 @@ function renderWhatsAppConnectBody(status = null) {
   if (!bridgeAvailable) {
     lastRenderedWhatsAppQr = null;
     const hostedHint = hosted
-      ? `<p class="wa-connect-hint">The QR scanner runs on this server. First start can take <strong>60–90 seconds</strong> while Chrome loads — keep this window open.</p>
-         <p class="wa-connect-hint">If no QR after 2 minutes, click <strong>Reset Connection</strong> below, wait 90 seconds, then scan when QR appears.</p>`
+      ? `<p class="wa-connect-hint">The QR scanner runs on this server — keep this window open. QR usually appears within <strong>15–30 seconds</strong>.</p>
+         <p class="wa-connect-hint">If no QR after 1 minute, click <strong>Reset Connection</strong>, wait a few seconds, then scan when QR appears.</p>`
       : `<ol class="wa-connect-steps">
           <li>Install <strong>Node.js</strong> from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> if not installed</li>
           <li>Close this page and restart <strong>Start Billing.bat</strong></li>
@@ -3194,7 +3194,7 @@ function renderWhatsAppConnectBody(status = null) {
         <p class="wa-connect-msg">Starting WhatsApp scanner…</p>
         <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:35%"></div></div>
         ${errorHtml}
-        <p class="wa-connect-hint">QR code will appear here in about <strong>30–60 seconds</strong>. Keep this window open.</p>
+        <p class="wa-connect-hint">QR code will appear here in about <strong>15–30 seconds</strong>. Keep this window open.</p>
         <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
       `;
       bindWhatsAppResetButton();

@@ -29,8 +29,8 @@ const AUTH_READY_TIMEOUT_MS = Number(
   process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 420000 : 180000)
 );
 const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 0 : 60000));
-const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 30000 : 150000));
-const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 45000 : 120000));
+const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 15000 : 150000));
+const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 35000 : 120000));
 const CLIENT_ID = process.env.WHATSAPP_CLIENT_ID || "rinse-rise";
 
 const state = {
@@ -213,9 +213,22 @@ function releaseSingleInstanceLock() {
   }
 }
 
-/** Hosted: Puppeteer bundled Chrome. Local Windows: system Chrome/Edge. */
+/** Hosted: system Chromium (fast). Local Windows: system Chrome/Edge. */
 function resolveChromePath() {
   if (IS_HOSTED) {
+    const candidates = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/google-chrome-stable",
+    ].filter(Boolean);
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate)) return candidate;
+      } catch {
+        /* ignore */
+      }
+    }
     try {
       const puppeteer = require("puppeteer");
       const bundled = puppeteer.executablePath();
@@ -223,8 +236,6 @@ function resolveChromePath() {
     } catch (err) {
       console.warn("[WhatsApp] Puppeteer bundled Chrome lookup:", err.message);
     }
-    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || "";
-    if (envPath && fs.existsSync(envPath)) return envPath;
     return "";
   }
 
@@ -252,7 +263,13 @@ function resolveChromePath() {
   return "";
 }
 
-const CHROME_PATH = resolveChromePath();
+let chromePathCache = null;
+function getChromePath() {
+  if (chromePathCache === null) {
+    chromePathCache = resolveChromePath();
+  }
+  return chromePathCache;
+}
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -560,8 +577,9 @@ function sessionDirPath() {
 
 function validateHostedChrome() {
   if (!IS_HOSTED) return true;
-  if (CHROME_PATH && fs.existsSync(CHROME_PATH)) {
-    console.log(`[WhatsApp] Using Chrome: ${CHROME_PATH}`);
+  const chromePath = getChromePath();
+  if (chromePath && fs.existsSync(chromePath)) {
+    console.log(`[WhatsApp] Using Chrome: ${chromePath}`);
     return true;
   }
   state.phase = "error";
@@ -584,10 +602,15 @@ function createClient() {
       "--disable-extensions",
       "--disable-background-networking",
       "--disable-blink-features=AutomationControlled",
+      "--disable-features=IsolateOrigins,site-per-process,TranslateUI",
+      "--disable-ipc-flooding-protection",
+      "--disable-renderer-backgrounding",
+      "--disable-background-timer-throttling",
     ],
   };
-  if (CHROME_PATH) {
-    puppeteerConfig.executablePath = CHROME_PATH;
+  const chromePath = getChromePath();
+  if (chromePath) {
+    puppeteerConfig.executablePath = chromePath;
   }
 
   const clientOptions = {
@@ -779,7 +802,7 @@ async function initializeClient({ fresh = false } = {}) {
   const linked = hasSessionLinked();
   state.phase = linked && !IS_HOSTED ? "restoring" : "starting";
   state.lastError = IS_HOSTED
-    ? "Starting WhatsApp scanner — QR will appear in about 30–60 seconds."
+    ? "Loading WhatsApp scanner — QR will appear shortly."
     : linked
       ? "Restoring saved WhatsApp session — no scan needed if already linked on your phone."
       : null;
@@ -1351,20 +1374,24 @@ const server = app.listen(PORT, "127.0.0.1", () => {
   process.on("exit", releaseSingleInstanceLock);
 
   ensureAuthDirs();
-  migrateLegacyAuthDir();
-  state.sessionLinked = hasSessionLinked();
   console.log(`[WhatsApp] Bridge running on http://127.0.0.1:${PORT}`);
   console.log(`[WhatsApp] Session data: ${AUTH_DIR}`);
   console.log(`[WhatsApp] WA Web version: ${WA_WEB_VERSION}`);
-  if (CHROME_PATH) {
-    console.log(`[WhatsApp] Using browser: ${CHROME_PATH}`);
-  } else {
-    console.warn("[WhatsApp] No system Chrome/Edge found — using Puppeteer Chromium.");
-  }
-  initializeClient().catch((err) => {
-    state.phase = "error";
-    state.lastError = err.message;
-    console.error("[WhatsApp] Init failed:", err.message);
+  setImmediate(() => {
+    ensureWaWebCache();
+    migrateLegacyAuthDir();
+    state.sessionLinked = hasSessionLinked();
+    const chromePath = getChromePath();
+    if (chromePath) {
+      console.log(`[WhatsApp] Using browser: ${chromePath}`);
+    } else {
+      console.warn("[WhatsApp] No Chrome found — scanner may fail on this machine.");
+    }
+    initializeClient().catch((err) => {
+      state.phase = "error";
+      state.lastError = err.message;
+      console.error("[WhatsApp] Init failed:", err.message);
+    });
   });
 });
 

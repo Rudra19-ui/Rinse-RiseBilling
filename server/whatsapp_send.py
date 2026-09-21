@@ -163,16 +163,36 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
             "enabled": True,
         }
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        if bridge_is_running():
+            try:
+                health = _bridge_request("/health", timeout=3)
+                return {
+                    "available": True,
+                    "ready": bool(health.get("ready")),
+                    "qr": None,
+                    "lastError": "Loading WhatsApp scanner — QR will appear shortly.",
+                    "phase": health.get("phase") or "starting",
+                    "loadingPercent": 15,
+                    "sessionLinked": bool(health.get("sessionLinked")),
+                    "sessionRestoring": False,
+                    "sessionLocked": False,
+                    "qrGeneration": 0,
+                    "hosted": hosted,
+                    "enabled": True,
+                }
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                pass
+
         from paths import whatsapp_auth_dir
 
         auth_dir = whatsapp_auth_dir()
         session_linked = (auth_dir / ".session-linked").is_file()
         log_tail = read_bridge_log_tail() if hosted else ""
-        bridge_hint = "Scanner is starting on the server — wait 60–90 seconds."
+        bridge_hint = "Starting WhatsApp scanner — QR will appear in a few seconds."
         if "initialize() failed" in log_tail or "Init failed" in log_tail:
-            bridge_hint = "Scanner failed to start — click Reset Connection, wait 90 seconds, then scan the QR."
-        elif session_linked:
-            bridge_hint = "Scanner is starting — QR will appear in about 30–60 seconds."
+            bridge_hint = "Scanner failed to start — click Reset Connection, then scan the QR."
+        elif "Chrome binary missing" in log_tail or "could not find Chrome" in log_tail:
+            bridge_hint = "Scanner could not find Chrome — redeploy the billing app on Railway."
         return {
             "available": False,
             "ready": False,
