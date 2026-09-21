@@ -31,8 +31,6 @@ const AUTH_READY_TIMEOUT_MS = Number(
 const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 0 : 60000));
 const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 30000 : 150000));
 const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 45000 : 120000));
-const WA_REMOTE_CACHE =
-  "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html";
 const CLIENT_ID = process.env.WHATSAPP_CLIENT_ID || "rinse-rise";
 
 const state = {
@@ -599,19 +597,12 @@ function createClient() {
     takeoverTimeoutMs: 0,
   };
 
-  if (IS_HOSTED) {
-    // Remote WA Web version — most reliable for generating QR on Railway.
-    clientOptions.webVersionCache = {
-      type: "remote",
-      remotePath: WA_REMOTE_CACHE,
-    };
-  } else {
-    clientOptions.webVersion = WA_WEB_VERSION;
-    clientOptions.webVersionCache = {
-      type: "local",
-      path: CACHE_DIR,
-    };
-  }
+  // Always pin bundled WA Web HTML — remote fetch often fails or delays QR on Railway.
+  clientOptions.webVersion = WA_WEB_VERSION;
+  clientOptions.webVersionCache = {
+    type: "local",
+    path: CACHE_DIR,
+  };
 
   return new Client(clientOptions);
 }
@@ -769,7 +760,7 @@ function wipeAuthDir() {
 async function initializeClient({ fresh = false } = {}) {
   bridgeStartedAt = Date.now();
   qrDuringRestoreCount = 0;
-  if (!IS_HOSTED) ensureWaWebCache();
+  ensureWaWebCache();
   if (!validateHostedChrome()) return;
 
   if (fresh) {

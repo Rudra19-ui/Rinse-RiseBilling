@@ -10,6 +10,13 @@ WA_CACHE="${WHATSAPP_CACHE_DIR:-$DATA/whatsapp-cache}"
 mkdir -p "$DATA/invoices" "$WA_AUTH" "$WA_CACHE"
 touch "$DATA/.persistent_volume" 2>/dev/null || true
 
+# Seed bundled WA Web HTML when volume cache is empty (QR appears faster)
+WA_VER="${WHATSAPP_WEB_VERSION:-2.3000.1043441279-alpha}"
+if [ -f "/app/whatsapp-bridge/wa-cache/${WA_VER}.html" ] && [ ! -f "$WA_CACHE/${WA_VER}.html" ]; then
+  cp "/app/whatsapp-bridge/wa-cache/${WA_VER}.html" "$WA_CACHE/${WA_VER}.html"
+  echo "Seeded WhatsApp Web cache (${WA_VER})"
+fi
+
 # Stale lock from a previous container must not block startup
 rm -f "$WA_AUTH/.bridge.lock" 2>/dev/null || true
 
@@ -70,7 +77,7 @@ start_bridge_background
 if [ "${WHATSAPP_ENABLED:-1}" != "0" ]; then
   echo "Waiting for WhatsApp bridge to start..."
   waited=0
-  while [ "$waited" -lt 45 ]; do
+  while [ "$waited" -lt 90 ]; do
     if bridge_healthy; then
       echo "WhatsApp bridge is up (session restores automatically if already linked)."
       break

@@ -21,7 +21,7 @@ BRIDGE_TIMEOUT = 60
 
 
 def _bridge_status_timeout() -> int:
-    return 10 if is_cloud_deployment() else 4
+    return 20 if is_cloud_deployment() else 4
 
 
 def is_cloud_deployment() -> bool:

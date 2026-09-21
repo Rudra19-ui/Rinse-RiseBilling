@@ -3178,7 +3178,14 @@ function renderWhatsAppConnectBody(status = null) {
     return;
   }
 
-  if (status?.phase === "loading" || status?.phase === "authenticating" || status?.phase === "restoring" || status?.phase === "reconnecting" || status?.phase === "starting") {
+  if (
+    status?.phase === "loading" ||
+    status?.phase === "authenticating" ||
+    status?.phase === "connecting" ||
+    status?.phase === "restoring" ||
+    status?.phase === "reconnecting" ||
+    status?.phase === "starting"
+  ) {
     lastRenderedWhatsAppQr = null;
     const hosted = isWhatsAppHosted(status);
     const restoring = isWhatsAppSessionRestoring(status);
@@ -3211,7 +3218,11 @@ function renderWhatsAppConnectBody(status = null) {
           : `Phone linked — finishing setup${elapsed ? ` (${elapsed}s)` : ""}…`
         : status.phase === "reconnecting"
           ? "Reconnecting WhatsApp…"
-          : `Loading WhatsApp Web… ${pct}%`;
+          : status.phase === "connecting"
+            ? hosted
+              ? `Phone linked — finishing setup on server${elapsed ? ` (${elapsed}s)` : ""}…`
+              : `Phone linked — finishing setup${elapsed ? ` (${elapsed}s)` : ""}…`
+            : `Loading WhatsApp Web… ${pct}%`;
     const hint = restoring
       ? "You already linked WhatsApp — no need to scan again unless a new QR appears below. Bills can be sent from any device once status shows Ready."
       : hosted
