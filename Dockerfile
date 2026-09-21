@@ -4,8 +4,6 @@ FROM node:20-bookworm-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080 \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     WHATSAPP_BRIDGE_URL=http://127.0.0.1:3001 \
     WHATSAPP_BRIDGE_PORT=3001 \
     DATA_DIR=/app/data \
@@ -24,7 +22,6 @@ RUN apt-get update \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
-        chromium \
         ca-certificates \
         libnss3 \
         libnspr4 \
@@ -59,7 +56,9 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
 COPY whatsapp-bridge/package.json whatsapp-bridge/package-lock.json ./whatsapp-bridge/
-RUN cd whatsapp-bridge && npm ci --omit=dev --ignore-scripts
+RUN cd whatsapp-bridge && npm ci --omit=dev --ignore-scripts \
+    && npx puppeteer browsers install chrome \
+    && node -e "const p=require('puppeteer'); const fs=require('fs'); const e=p.executablePath(); if(!fs.existsSync(e)) { console.error('Chrome missing:', e); process.exit(1); } console.log('Chrome OK:', e);"
 
 COPY whatsapp-bridge/patch-wwebjs.js ./whatsapp-bridge/
 RUN cd whatsapp-bridge && node patch-wwebjs.js

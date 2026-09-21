@@ -3032,7 +3032,9 @@ async function refreshWhatsAppStatus() {
         : status.available
           ? whatsAppNeedsQrScan(status)
             ? "Link WhatsApp"
-            : "Starting…"
+            : (status.startupSeconds || 0) >= 25
+              ? "Tap to Link"
+              : "Starting…"
           : onHosted
             ? "Starting Scanner…"
             : "WhatsApp Offline";
@@ -3202,11 +3204,17 @@ function renderWhatsAppConnectBody(status = null) {
     const hosted = isWhatsAppHosted(status);
     const restoring = isWhatsAppSessionRestoring(status);
     if (hosted && status?.phase === "starting" && !status?.ready) {
+      const elapsed = status.startupSeconds || 0;
+      const pct = Math.min(90, 20 + elapsed * 2);
+      const stuckHint =
+        elapsed >= 25
+          ? "Scanner is taking longer than usual. Click <strong>Reset Connection</strong> below to force a fresh QR code."
+          : "QR code will appear here in about <strong>15–30 seconds</strong>. Keep this window open.";
       body.innerHTML = `
-        <p class="wa-connect-msg">Starting WhatsApp scanner…</p>
-        <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:35%"></div></div>
+        <p class="wa-connect-msg">Starting WhatsApp scanner${elapsed ? ` (${elapsed}s)` : ""}…</p>
+        <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:${pct}%"></div></div>
         ${errorHtml}
-        <p class="wa-connect-hint">QR code will appear here in about <strong>15–30 seconds</strong>. Keep this window open.</p>
+        <p class="wa-connect-hint">${stuckHint}</p>
         <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
       `;
       bindWhatsAppResetButton();
@@ -5659,7 +5667,7 @@ async function init() {
   if (isHostedDeployment()) {
     API.getWhatsAppStatus(true).catch(() => {});
   }
-  setInterval(refreshWhatsAppStatus, 15000);
+  setInterval(refreshWhatsAppStatus, 5000);
   els.historySearch.addEventListener("input", (e) => {
     historySearchQuery = e.target.value;
     renderHistoryList();

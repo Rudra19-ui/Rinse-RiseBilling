@@ -159,6 +159,7 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
             "sessionRestoring": bool(status.get("sessionRestoring")),
             "sessionLocked": bool(status.get("sessionLocked")),
             "qrGeneration": status.get("qrGeneration", 0),
+            "startupSeconds": status.get("startupSeconds", 0),
             "hosted": hosted,
             "enabled": True,
         }

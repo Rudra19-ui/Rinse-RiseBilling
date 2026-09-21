@@ -29,8 +29,9 @@ const AUTH_READY_TIMEOUT_MS = Number(
   process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 420000 : 180000)
 );
 const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 0 : 60000));
-const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 15000 : 150000));
-const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 35000 : 120000));
+const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 12000 : 150000));
+const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 25000 : 120000));
+const INIT_TIMEOUT_MS = Number(process.env.WHATSAPP_INIT_TIMEOUT_MS || (IS_HOSTED ? 40000 : 90000));
 const CLIENT_ID = process.env.WHATSAPP_CLIENT_ID || "rinse-rise";
 
 const state = {
@@ -61,6 +62,8 @@ const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
 const SESSION_LINKED_FILE = path.join(AUTH_DIR, ".session-linked");
 let lastReconnectAt = 0;
 let bridgeStartedAt = Date.now();
+let initInProgress = false;
+let freshQrInFlight = false;
 
 function ensureAuthDirs() {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
@@ -118,7 +121,10 @@ function scheduleRestoreWatchdog() {
 }
 
 async function forceFreshQrLink(reason) {
+  if (freshQrInFlight) return;
+  freshQrInFlight = true;
   clearRestoreWatchdog();
+  clearQrStartupWatchdog();
   clearSessionLinked();
   state.ready = false;
   state.qr = null;
@@ -133,6 +139,8 @@ async function forceFreshQrLink(reason) {
     state.phase = "error";
     state.lastError = err.message || "Could not restart WhatsApp scanner.";
     console.error("[WhatsApp] Fresh QR restart failed:", err.message);
+  } finally {
+    freshQrInFlight = false;
   }
 }
 
@@ -213,9 +221,16 @@ function releaseSingleInstanceLock() {
   }
 }
 
-/** Hosted: system Chromium (fast). Local Windows: system Chrome/Edge. */
+/** Hosted: Puppeteer bundled Chrome (most reliable). Local Windows: system Chrome/Edge. */
 function resolveChromePath() {
   if (IS_HOSTED) {
+    try {
+      const puppeteer = require("puppeteer");
+      const bundled = puppeteer.executablePath();
+      if (bundled && fs.existsSync(bundled)) return bundled;
+    } catch (err) {
+      console.warn("[WhatsApp] Puppeteer bundled Chrome lookup:", err.message);
+    }
     const candidates = [
       process.env.PUPPETEER_EXECUTABLE_PATH,
       "/usr/bin/chromium",
@@ -228,13 +243,6 @@ function resolveChromePath() {
       } catch {
         /* ignore */
       }
-    }
-    try {
-      const puppeteer = require("puppeteer");
-      const bundled = puppeteer.executablePath();
-      if (bundled && fs.existsSync(bundled)) return bundled;
-    } catch (err) {
-      console.warn("[WhatsApp] Puppeteer bundled Chrome lookup:", err.message);
     }
     return "";
   }
@@ -269,6 +277,10 @@ function getChromePath() {
     chromePathCache = resolveChromePath();
   }
   return chromePathCache;
+}
+
+function resetChromePathCache() {
+  chromePathCache = null;
 }
 
 const app = express();
@@ -790,11 +802,17 @@ function wipeAuthDir() {
   clearSessionLinked();
 }
 
-async function initializeClient({ fresh = false } = {}) {
+async function initializeClient({ fresh = false, _retried = false } = {}) {
+  if (initInProgress) return;
+  initInProgress = true;
   bridgeStartedAt = Date.now();
   qrDuringRestoreCount = 0;
   ensureWaWebCache();
-  if (!validateHostedChrome()) return;
+  resetChromePathCache();
+  if (!validateHostedChrome()) {
+    initInProgress = false;
+    return;
+  }
 
   if (fresh) {
     wipeAuthDir();
@@ -823,17 +841,36 @@ async function initializeClient({ fresh = false } = {}) {
   state.qr = null;
   state.qrGeneration = 0;
   if (linked) {
-    console.log("[WhatsApp] Restoring saved session from disk…");
+    console.log(
+      IS_HOSTED
+        ? "[WhatsApp] Checking saved session on server…"
+        : "[WhatsApp] Restoring saved session from disk…"
+    );
     scheduleRestoreWatchdog();
   }
   scheduleQrStartupWatchdog();
   try {
-    await client.initialize();
+    await Promise.race([
+      client.initialize(),
+      sleep(INIT_TIMEOUT_MS).then(() => {
+        throw new Error("INIT_TIMEOUT");
+      }),
+    ]);
   } catch (err) {
+    const timedOut = err?.message === "INIT_TIMEOUT" || /timeout/i.test(String(err?.message || ""));
+    if (IS_HOSTED && !_retried && timedOut) {
+      console.warn("[WhatsApp] Scanner init timed out — wiping session and retrying once for QR…");
+      await destroyClient();
+      wipeAuthDir();
+      initInProgress = false;
+      return initializeClient({ fresh: true, _retried: true });
+    }
     state.phase = "error";
     state.lastError = `Scanner failed to start: ${err.message}. Click Reset Connection and wait for a fresh QR.`;
     console.error("[WhatsApp] initialize() failed:", err.message);
     throw err;
+  } finally {
+    initInProgress = false;
   }
 }
 
@@ -1143,6 +1180,7 @@ app.get("/status", (_req, res) => {
     ["starting", "restoring", "loading", "authenticating", "connecting", "reconnecting"].includes(
       state.phase
     );
+  const startupSeconds = Math.max(0, Math.floor((Date.now() - bridgeStartedAt) / 1000));
   res.json({
     ready: state.ready,
     qr: state.qr,
@@ -1152,6 +1190,7 @@ app.get("/status", (_req, res) => {
     recovering,
     waState: state.waState,
     authenticatingSeconds: authSeconds,
+    startupSeconds,
     sessionLinked: linked,
     sessionRestoring: restoring,
     qrGeneration: state.qrGeneration,
