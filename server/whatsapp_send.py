@@ -172,15 +172,15 @@ def get_bridge_status(*, auto_start: bool = False) -> dict[str, Any]:
         if "initialize() failed" in log_tail or "Init failed" in log_tail:
             bridge_hint = "Scanner failed to start — click Reset Connection, wait 90 seconds, then scan the QR."
         elif session_linked:
-            bridge_hint = "Restoring saved session — wait up to 2 minutes, or click Reset Connection for a fresh QR."
+            bridge_hint = "Scanner is starting — QR will appear in about 30–60 seconds."
         return {
             "available": False,
             "ready": False,
             "qr": None,
             "lastError": bridge_hint if hosted else None,
-            "phase": "restoring" if hosted and session_linked else "starting",
+            "phase": "starting",
             "sessionLinked": session_linked,
-            "sessionRestoring": session_linked,
+            "sessionRestoring": False if hosted else session_linked,
             "sessionLocked": session_linked,
             "bridgeLogTail": log_tail[-1200:] if log_tail else None,
             "hosted": hosted,

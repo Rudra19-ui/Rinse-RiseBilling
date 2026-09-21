@@ -28,9 +28,11 @@ const BUNDLED_CACHE_DIR = path.join(__dirname, "wa-cache");
 const AUTH_READY_TIMEOUT_MS = Number(
   process.env.WHATSAPP_AUTH_TIMEOUT_MS || (IS_HOSTED ? 420000 : 180000)
 );
-const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 45000 : 60000));
-const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 120000 : 150000));
-const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 90000 : 120000));
+const RESTORE_QR_GRACE_MS = Number(process.env.WHATSAPP_RESTORE_GRACE_MS || (IS_HOSTED ? 0 : 60000));
+const RESTORE_FAIL_MS = Number(process.env.WHATSAPP_RESTORE_FAIL_MS || (IS_HOSTED ? 30000 : 150000));
+const QR_STARTUP_TIMEOUT_MS = Number(process.env.WHATSAPP_QR_TIMEOUT_MS || (IS_HOSTED ? 45000 : 120000));
+const WA_REMOTE_CACHE =
+  "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html";
 const CLIENT_ID = process.env.WHATSAPP_CLIENT_ID || "rinse-rise";
 
 const state = {
@@ -120,19 +122,12 @@ async function forceFreshQrLink(reason) {
   state.ready = false;
   state.qr = null;
   state.phase = "starting";
-  state.lastError =
-    reason === "qr-startup-timeout"
-      ? "Generating a fresh QR code — scan below when it appears."
-      : "Saved session expired — scan the QR code below to link WhatsApp again.";
+  state.lastError = "Generating QR code — keep this window open…";
   qrDuringRestoreCount = 0;
   console.warn("[WhatsApp] Forcing fresh QR link:", reason);
   try {
     await destroyClient();
-    if (reason === "qr-startup-timeout" || reason === "restore-timeout") {
-      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-      fs.mkdirSync(AUTH_DIR, { recursive: true });
-    }
-    await initializeClient();
+    await initializeClient({ fresh: true });
   } catch (err) {
     state.phase = "error";
     state.lastError = err.message || "Could not restart WhatsApp scanner.";
@@ -499,6 +494,23 @@ function startStoreReadyPoll() {
   }, 2000);
 }
 
+function sessionDirPath() {
+  return path.join(AUTH_DIR, `session-${CLIENT_ID}`);
+}
+
+function validateHostedChrome() {
+  if (!IS_HOSTED) return true;
+  if (CHROME_PATH && fs.existsSync(CHROME_PATH)) {
+    console.log(`[WhatsApp] Using Chrome: ${CHROME_PATH}`);
+    return true;
+  }
+  state.phase = "error";
+  state.lastError =
+    "WhatsApp scanner could not find Chrome on the server. Redeploy the billing app and try again.";
+  console.error("[WhatsApp] Chrome binary missing on hosted server.");
+  return false;
+}
+
 function createClient() {
   const puppeteerConfig = {
     headless: true,
@@ -518,71 +530,75 @@ function createClient() {
     puppeteerConfig.executablePath = CHROME_PATH;
   }
 
-  // Always pin a known-good local WA Web HTML. Remote "latest" often authenticates
-  // but never fires ready (breaks QR linking).
   const clientOptions = {
     authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: CLIENT_ID }),
     puppeteer: puppeteerConfig,
     takeoverOnConflict: false,
     takeoverTimeoutMs: 0,
-    webVersion: WA_WEB_VERSION,
-    webVersionCache: {
+  };
+
+  if (IS_HOSTED) {
+    // Remote WA Web version — most reliable for generating QR on Railway.
+    clientOptions.webVersionCache = {
+      type: "remote",
+      remotePath: WA_REMOTE_CACHE,
+    };
+  } else {
+    clientOptions.webVersion = WA_WEB_VERSION;
+    clientOptions.webVersionCache = {
       type: "local",
       path: CACHE_DIR,
-    },
-  };
+    };
+  }
 
   return new Client(clientOptions);
 }
 
 function bindClientEvents(waClient) {
   waClient.on("qr", async (qr) => {
-    const linked = hasSessionLinked();
-    const graceElapsed = Date.now() - bridgeStartedAt >= RESTORE_QR_GRACE_MS;
-    const inRestoreGrace = linked && !graceElapsed;
-
     state.ready = false;
     state.authenticatingSince = null;
     clearTimeout(authTimer);
+    clearRestoreWatchdog();
 
-    if (inRestoreGrace) {
-      qrDuringRestoreCount += 1;
-      if (qrDuringRestoreCount === 1) {
-        state.phase = "restoring";
-        state.qr = null;
-        state.lastError =
-          "Restoring saved WhatsApp session — no scan needed. This can take 2–3 minutes on the server.";
-        console.log("[WhatsApp] QR during restore grace — waiting for saved session…");
-        startConnectedPoll(waClient);
-        return;
+    const linked = hasSessionLinked();
+    if (linked && !IS_HOSTED && RESTORE_QR_GRACE_MS > 0) {
+      const graceElapsed = Date.now() - bridgeStartedAt >= RESTORE_QR_GRACE_MS;
+      if (!graceElapsed) {
+        qrDuringRestoreCount += 1;
+        if (qrDuringRestoreCount === 1) {
+          state.phase = "restoring";
+          state.qr = null;
+          state.lastError = "Restoring saved WhatsApp session…";
+          console.log("[WhatsApp] QR during restore grace — waiting for saved session…");
+          startConnectedPoll(waClient);
+          return;
+        }
       }
-      console.log("[WhatsApp] Repeated QR during restore — saved session expired, showing QR…");
-      clearSessionLinked();
     }
+    if (linked) clearSessionLinked();
 
-    state.phase = linked ? "reconnecting" : "qr";
+    state.phase = "qr";
     state.loadingPercent = 0;
-    state.lastError = linked
-      ? "Saved session expired — scan QR once to link again."
-      : null;
+    state.lastError = null;
     try {
       clearQrStartupWatchdog();
       state.qrGeneration += 1;
       state.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280, errorCorrectionLevel: "M" });
+      console.log(`[WhatsApp] QR ready (#${state.qrGeneration}) — scan in billing app.`);
     } catch (err) {
       state.lastError = "Could not render QR code.";
       console.error("[WhatsApp] QR render failed:", err.message);
     }
-    if (linked) {
-      console.log("[WhatsApp] Saved session needs re-link — scan QR in the billing app.");
-    } else {
-      console.log("[WhatsApp] Scan QR code in the billing app to connect (one-time setup).");
-    }
   });
 
   waClient.on("loading_screen", (percent, message) => {
-    state.phase = "loading";
     state.loadingPercent = Number(percent) || 0;
+    if (state.phase === "qr" && state.qr && !state.ready) {
+      if (message) console.log(`[WhatsApp] Loading ${percent}% (QR still visible) — ${message}`);
+      return;
+    }
+    state.phase = "loading";
     state.qr = null;
     if (message) console.log(`[WhatsApp] Loading ${percent}% — ${message}`);
     if (state.loadingPercent >= 90) {
@@ -682,18 +698,38 @@ async function destroyClient() {
   client = null;
 }
 
-async function initializeClient() {
+function wipeAuthDir() {
+  fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  clearSessionLinked();
+}
+
+async function initializeClient({ fresh = false } = {}) {
   bridgeStartedAt = Date.now();
   qrDuringRestoreCount = 0;
-  ensureWaWebCache();
+  if (!IS_HOSTED) ensureWaWebCache();
+  if (!validateHostedChrome()) return;
+
+  if (fresh) {
+    wipeAuthDir();
+  } else if (IS_HOSTED && hasSessionLinked()) {
+    const sessionDir = sessionDirPath();
+    if (!fs.existsSync(sessionDir)) {
+      console.warn("[WhatsApp] Session marker without data — clearing for fresh QR.");
+      wipeAuthDir();
+    }
+  }
+
   await destroyClient();
   client = createClient();
   bindClientEvents(client);
   const linked = hasSessionLinked();
-  state.phase = linked ? "restoring" : "starting";
-  state.lastError = linked
-    ? "Restoring saved WhatsApp session — no scan needed if already linked on your phone."
-    : null;
+  state.phase = linked && !IS_HOSTED ? "restoring" : "starting";
+  state.lastError = IS_HOSTED
+    ? "Starting WhatsApp scanner — QR will appear in about 30–60 seconds."
+    : linked
+      ? "Restoring saved WhatsApp session — no scan needed if already linked on your phone."
+      : null;
   state.ready = false;
   state.authenticatingSince = null;
   state.waState = null;
@@ -789,25 +825,7 @@ async function resetSession() {
   state.loadingPercent = 0;
 
   await destroyClient();
-
-  clearSessionLinked();
-  fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-  // Keep pinned HTML in cache; only wipe other cached versions
-  if (fs.existsSync(CACHE_DIR)) {
-    for (const name of fs.readdirSync(CACHE_DIR)) {
-      if (!name.includes(WA_WEB_VERSION)) {
-        try {
-          fs.rmSync(path.join(CACHE_DIR, name), { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-
-  await initializeClient();
+  await initializeClient({ fresh: true });
 }
 
 function normalizePhone(phone) {
@@ -1040,8 +1058,10 @@ app.get("/status", (_req, res) => {
     : 0;
   const linked = state.sessionLinked || hasSessionLinked();
   const restoring =
+    !IS_HOSTED &&
     linked &&
     !state.ready &&
+    !state.qr &&
     ["starting", "restoring", "loading", "authenticating", "connecting", "reconnecting"].includes(
       state.phase
     );

@@ -2950,6 +2950,7 @@ function isWhatsAppHosted(status) {
 
 function isWhatsAppSessionRestoring(status) {
   if (status?.qr || status?.phase === "qr") return false;
+  if (isWhatsAppHosted(status)) return false;
   return Boolean(
     status?.sessionRestoring ||
       (status?.sessionLinked &&
@@ -3156,6 +3157,17 @@ function renderWhatsAppConnectBody(status = null) {
     lastRenderedWhatsAppQr = null;
     const hosted = isWhatsAppHosted(status);
     const restoring = isWhatsAppSessionRestoring(status);
+    if (hosted && status?.phase === "starting" && !status?.ready) {
+      body.innerHTML = `
+        <p class="wa-connect-msg">Starting WhatsApp scanner…</p>
+        <div class="wa-connect-progress"><div class="wa-connect-progress-bar" style="width:35%"></div></div>
+        ${errorHtml}
+        <p class="wa-connect-hint">QR code will appear here in about <strong>30–60 seconds</strong>. Keep this window open.</p>
+        <button type="button" class="btn btn-secondary wa-reset-btn" id="whatsappResetBtn">Reset Connection</button>
+      `;
+      bindWhatsAppResetButton();
+      return;
+    }
     const pct = status.loadingPercent || 0;
     const elapsed = status.authenticatingSeconds || 0;
     const displayPct =
