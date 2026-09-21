@@ -740,7 +740,7 @@ function isWhatsAppSendBusyError(message) {
 
 let whatsAppSendInFlight = false;
 
-async function sendBillWhatsAppWithRetry(billId, options = {}, attempts = 8) {
+async function sendBillWhatsAppWithRetry(billId, options = {}, attempts = 5) {
   if (whatsAppSendInFlight) {
     throw new Error("WhatsApp is already sending another invoice — please wait a few seconds.");
   }
@@ -752,8 +752,12 @@ async function sendBillWhatsAppWithRetry(billId, options = {}, attempts = 8) {
         return await API.sendBillWhatsApp(billId, options);
       } catch (err) {
         lastError = err;
-        if (isWhatsAppSendBusyError(err.message) && attempt < attempts - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 5000 + attempt * 1000));
+        if (
+          (isWhatsAppSendBusyError(err.message) ||
+            /timed out|still connecting|still loading|wait 10 seconds/i.test(err.message || "")) &&
+          attempt < attempts - 1
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 4000 + attempt * 1500));
           continue;
         }
         throw err;

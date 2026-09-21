@@ -97,7 +97,7 @@ exec gunicorn \
   --bind "0.0.0.0:${PORT}" \
   --workers "${WEB_CONCURRENCY:-1}" \
   --threads 8 \
-  --timeout 90 \
+  --timeout 120 \
   --access-logfile - \
   --error-logfile - \
   --chdir /app/server \

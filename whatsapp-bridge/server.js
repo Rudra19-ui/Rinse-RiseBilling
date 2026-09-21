@@ -56,7 +56,8 @@ let recovering = false;
 let sendInProgress = false;
 let sendInProgressSince = 0;
 const SEND_LOCK_MAX_MS = Number(process.env.WHATSAPP_SEND_LOCK_MS || 60000);
-const SEND_OPERATION_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 55000);
+const SEND_OPERATION_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || (IS_HOSTED ? 90000 : 60000));
+const GET_NUMBER_ID_TIMEOUT_MS = Number(process.env.WHATSAPP_NUMBER_LOOKUP_MS || 5000);
 
 const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
 const SESSION_LINKED_FILE = path.join(AUTH_DIR, ".session-linked");
@@ -1011,68 +1012,92 @@ async function resolveSendTargets(digits) {
 const SEND_OPTIONS = { sendSeen: false, sendMediaAsDocument: true };
 const SEND_IMAGE_OPTIONS = { sendSeen: false, sendMediaAsDocument: false };
 
-async function assertSendReady({ maxCommsWaitMs = 8000 } = {}) {
-  if (!client) throw new Error("WhatsApp not connected.");
+async function quickSendCheck() {
+  if (!client || !state.ready) {
+    throw new Error("WhatsApp not connected.");
+  }
   const waState = await client.getState();
   if (waState !== "CONNECTED") {
     state.ready = false;
     throw new Error(`WhatsApp not fully connected (${waState || "unknown"}).`);
   }
-  const storeReady = await isWhatsAppStoreReady();
-  if (!storeReady) {
-    state.ready = false;
-    state.phase = "loading";
-    state.lastError = "WhatsApp chat system is still loading. Wait 30 seconds and try again.";
-    startStoreReadyPoll();
-    const err = new Error(
-      "WhatsApp is still loading. Wait about 30 seconds, then try Send on WhatsApp again."
-    );
-    err.code = "STORE_NOT_READY";
+}
+
+async function assertSendReady({ maxCommsWaitMs = 3000 } = {}) {
+  await quickSendCheck();
+  if (await isWhatsAppStoreReady()) {
+    if (await isCommsReady()) return;
+  }
+  state.ready = false;
+  state.phase = "loading";
+  state.lastError = "WhatsApp is still connecting. Wait a few seconds and try again.";
+  const commsOk = maxCommsWaitMs > 0 ? await waitForCommsReady(maxCommsWaitMs) : false;
+  if (!commsOk) {
+    const err = new Error("WhatsApp is still starting its send layer. Wait a few seconds, then try again.");
+    err.code = "COMMS_NOT_READY";
     throw err;
   }
-  if (!(await isCommsReady())) {
-    state.ready = false;
-    state.phase = "loading";
-    state.lastError = "WhatsApp is still connecting. Wait a few seconds and try again.";
-    const commsOk = maxCommsWaitMs > 0 ? await waitForCommsReady(maxCommsWaitMs) : false;
-    if (!commsOk) {
-      const err = new Error(
-        "WhatsApp is still starting its send layer. Wait a few seconds, then try again."
-      );
-      err.code = "COMMS_NOT_READY";
-      throw err;
-    }
-    await sleep(1000);
+  state.ready = true;
+  state.phase = "ready";
+}
+
+async function lookupRegisteredChatId(digits) {
+  try {
+    const registered = await Promise.race([
+      client.getNumberId(digits),
+      sleep(GET_NUMBER_ID_TIMEOUT_MS).then(() => null),
+    ]);
+    return serializeWid(registered);
+  } catch (err) {
+    console.warn("[WhatsApp] getNumberId failed:", err.message);
+    return null;
   }
 }
 
-async function performSend(digits, message, filePath, filename) {
-  await assertSendReady({ maxCommsWaitMs: 8000 });
+async function sendMediaToChat(chatId, media, caption) {
+  await client.sendMessage(chatId, media, {
+    ...SEND_OPTIONS,
+    caption: caption || "",
+  });
+}
 
-  const targets = await resolveSendTargets(digits);
+async function performSend(digits, message, filePath, filename) {
+  await quickSendCheck();
+
   const media = MessageMedia.fromFilePath(filePath);
   media.filename = filename || path.basename(filePath);
+  const caption = message || "";
+  const phoneChatId = `${digits}@c.us`;
 
+  // Fast path — most Indian numbers work with @c.us directly (skip slow getNumberId).
+  try {
+    await sendMediaToChat(phoneChatId, media, caption);
+    return;
+  } catch (err) {
+    if (err?.code === "NOT_ON_WHATSAPP") throw err;
+    console.warn("[WhatsApp] Direct send failed, trying registered id:", err?.message || err);
+  }
+
+  const registeredId = await lookupRegisteredChatId(digits);
+  if (!registeredId) {
+    const err = new Error("This phone number is not registered on WhatsApp.");
+    err.code = "NOT_ON_WHATSAPP";
+    throw err;
+  }
+
+  const targets = registeredId === phoneChatId ? [phoneChatId] : [registeredId, phoneChatId];
   let lastErr = null;
   for (const chatId of targets) {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
-        if (attempt > 1) await assertSendReady({ maxCommsWaitMs: 2000 });
-        await ensureChatRegistered(chatId);
-        await client.sendMessage(chatId, media, {
-          ...SEND_OPTIONS,
-          caption: message || "",
-        });
+        await sendMediaToChat(chatId, media, caption);
         return;
       } catch (err) {
         lastErr = err;
-        if (isLidError(err) || isContactGetterError(err)) {
-          console.warn(`[WhatsApp] Contact/LID error on ${chatId} — trying alternate chat id…`);
-          break;
-        }
-        if (isCommsError(err) && attempt < 3) {
-          console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/6) — retrying…`);
-          await sleep(4000 * attempt);
+        if (err?.code === "NOT_ON_WHATSAPP") throw err;
+        if (isLidError(err) || isContactGetterError(err)) break;
+        if (isCommsError(err) && attempt < 2) {
+          await sleep(1500);
           continue;
         }
         throw err;
@@ -1352,29 +1377,17 @@ app.post("/send", async (req, res) => {
       }
 
       if (isSessionError(err)) {
+        state.ready = false;
         console.error("[WhatsApp] Send session error:", err.message);
-        releaseSendLock();
-        const reconnected = await softRecoverClient(err.message);
-        if (!reconnected) {
-          const friendly = isCommsError(err)
-            ? "WhatsApp is still starting on the server. Wait 1 minute, then tap Send on WhatsApp again."
-            : isStoreError(err)
-              ? "WhatsApp chat system is not ready yet. Wait 1 minute, open WhatsApp in the header, then try again."
-              : "WhatsApp send layer not ready. Open WhatsApp in the header, wait until it shows Ready, then try again.";
-          return res.status(503).json({
-            error: friendly,
-            needsReconnect: true,
-          });
-        }
-        if (!acquireSendLock()) {
-          return sendBusyResponse(res);
-        }
-        try {
-          await withSendTimeout(performSend(digits, message, filePath, filename), "bill send retry");
-          return res.json({ ok: true, recovered: true });
-        } finally {
-          releaseSendLock();
-        }
+        const friendly = isCommsError(err)
+          ? "WhatsApp is still connecting — wait 10 seconds and tap Send again."
+          : isStoreError(err)
+            ? "WhatsApp is still loading — wait 10 seconds and try again."
+            : "WhatsApp session hiccup — wait 10 seconds and tap Send again.";
+        return res.status(503).json({
+          error: friendly,
+          needsReconnect: true,
+        });
       }
 
       if (isStoreError(err)) {

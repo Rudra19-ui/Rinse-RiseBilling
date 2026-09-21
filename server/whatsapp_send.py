@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BRIDGE_DIR = ROOT / "whatsapp-bridge"
 BRIDGE_URL = os.environ.get("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3001").rstrip("/")
 BRIDGE_TIMEOUT = 60
+BRIDGE_SEND_TIMEOUT = int(os.environ.get("WHATSAPP_SEND_TIMEOUT", "120"))
 
 
 def _bridge_status_timeout() -> int:
@@ -296,7 +297,7 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
 
     last_error = "Failed to send on WhatsApp."
     needs_reconnect = False
-    for attempt in range(8):
+    for attempt in range(4):
         try:
             result = _bridge_request(
                 "/send",
@@ -307,6 +308,7 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
                     "pdfPath": str(pdf_path),
                     "filename": filename,
                 },
+                timeout=BRIDGE_SEND_TIMEOUT,
             )
             return {
                 "sent": bool(result.get("ok")),
@@ -325,14 +327,14 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
             except json.JSONDecodeError:
                 last_error = body or str(exc)
                 needs_reconnect = "detached frame" in last_error.lower()
-            if exc.code in (429, 503) and attempt < 7:
-                time.sleep(max(2, min(retry_after, 8)))
+            if exc.code in (429, 503) and attempt < 3:
+                time.sleep(max(2, min(retry_after, 6)))
                 continue
             break
         except (urllib.error.URLError, TimeoutError) as exc:
-            last_error = str(exc)
+            last_error = str(exc) if str(exc) else "WhatsApp send timed out — try again."
             if attempt < 3:
-                time.sleep(2)
+                time.sleep(3)
                 continue
             break
 
