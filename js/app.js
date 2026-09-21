@@ -732,6 +732,27 @@ function isWhatsAppReconnectError(message) {
   );
 }
 
+function isWhatsAppSendBusyError(message) {
+  return /another whatsapp send is in progress|send is in progress/i.test(String(message || ""));
+}
+
+async function sendBillWhatsAppWithRetry(billId, options = {}, attempts = 4) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await API.sendBillWhatsApp(billId, options);
+    } catch (err) {
+      lastError = err;
+      if (isWhatsAppSendBusyError(err.message) && attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError || new Error("Could not send on WhatsApp.");
+}
+
 let appAlertSecondaryHandler = null;
 let appAlertDismissHandler = null;
 
@@ -2812,7 +2833,7 @@ function startPendingWhatsAppWatcher(billId) {
     try {
       const status = await API.getWhatsAppStatus();
       if (!status.ready) return;
-      const result = await API.sendBillWhatsApp(pendingWhatsAppBillId);
+      const result = await sendBillWhatsAppWithRetry(pendingWhatsAppBillId, {}, 2);
       if (result.sent) {
         pendingWhatsAppBillId = null;
         stopPendingWhatsAppWatcher();
@@ -2822,6 +2843,7 @@ function startPendingWhatsAppWatcher(billId) {
         closeWhatsAppConnectModal();
         refreshWhatsAppStatus();
       } else if (result.error) {
+        if (isWhatsAppSendBusyError(result.error)) return;
         stopPendingWhatsAppWatcher();
         const block = parseWhatsAppSendError(result.error);
         if (block) showWhatsAppValidationAlert(block);
@@ -2865,9 +2887,12 @@ async function shareBillOnWhatsApp(phone, bill, { skipPaymentValidation = false 
     throw new Error("Bill must be saved before sending on WhatsApp.");
   }
 
+  stopPendingWhatsAppWatcher();
+  pendingWhatsAppBillId = null;
+
   let result;
   try {
-    result = await API.sendBillWhatsApp(bill.id, { skipPaymentValidation });
+    result = await sendBillWhatsAppWithRetry(bill.id, { skipPaymentValidation });
   } catch (err) {
     throw new Error(err.message || "Could not reach WhatsApp service.");
   }
@@ -5385,6 +5410,8 @@ function buildReceipt() {
 async function sendWhatsApp() {
   if (billItems.length === 0) return;
   if (!validateCustomerRequired()) return;
+  stopPendingWhatsAppWatcher();
+  pendingWhatsAppBillId = null;
 
   const phone = formatPhoneForWhatsApp(els.customerPhone.value.trim());
   if (phone.length < 12) {

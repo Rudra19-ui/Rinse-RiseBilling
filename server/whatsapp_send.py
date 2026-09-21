@@ -273,41 +273,54 @@ def send_bill_via_whatsapp(bill: dict[str, Any]) -> dict[str, Any]:
             "message": message,
         }
 
-    try:
-        result = _bridge_request(
-            "/send",
-            method="POST",
-            payload={
-                "phone": phone,
-                "message": message,
-                "pdfPath": str(pdf_path),
-                "filename": filename,
-            },
-        )
-        return {
-            "sent": bool(result.get("ok")),
-            "reason": "sent" if result.get("ok") else "send_failed",
-            "filename": filename,
-            "message": message,
-        }
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        needs_reconnect = False
+    last_error = "Failed to send on WhatsApp."
+    needs_reconnect = False
+    for attempt in range(4):
         try:
-            err = json.loads(body)
-            error = err.get("error", body)
-            needs_reconnect = bool(err.get("needsReconnect"))
-        except json.JSONDecodeError:
-            error = body or str(exc)
-            needs_reconnect = "detached frame" in error.lower()
-        return {
-            "sent": False,
-            "reason": "send_failed",
-            "error": error,
-            "needsReconnect": needs_reconnect,
-            "filename": filename,
-            "message": message,
-        }
+            result = _bridge_request(
+                "/send",
+                method="POST",
+                payload={
+                    "phone": phone,
+                    "message": message,
+                    "pdfPath": str(pdf_path),
+                    "filename": filename,
+                },
+            )
+            return {
+                "sent": bool(result.get("ok")),
+                "reason": "sent" if result.get("ok") else "send_failed",
+                "filename": filename,
+                "message": message,
+            }
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            try:
+                err = json.loads(body)
+                last_error = err.get("error", body)
+                needs_reconnect = bool(err.get("needsReconnect"))
+            except json.JSONDecodeError:
+                last_error = body or str(exc)
+                needs_reconnect = "detached frame" in last_error.lower()
+            if exc.code == 429 and attempt < 3:
+                time.sleep(4)
+                continue
+            break
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_error = str(exc)
+            if attempt < 3:
+                time.sleep(2)
+                continue
+            break
+
+    return {
+        "sent": False,
+        "reason": "send_failed",
+        "error": last_error,
+        "needsReconnect": needs_reconnect,
+        "filename": filename,
+        "message": message,
+    }
 
 
 def get_or_create_invoice_pdf(bill: dict[str, Any]) -> Path:

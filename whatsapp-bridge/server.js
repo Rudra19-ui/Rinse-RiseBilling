@@ -55,6 +55,9 @@ let qrDuringRestoreCount = 0;
 let client = null;
 let recovering = false;
 let sendInProgress = false;
+let sendInProgressSince = 0;
+const SEND_LOCK_MAX_MS = Number(process.env.WHATSAPP_SEND_LOCK_MS || 90000);
+const SEND_OPERATION_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 75000);
 
 const LOCK_FILE = path.join(AUTH_DIR, ".bridge.lock");
 const SESSION_LINKED_FILE = path.join(AUTH_DIR, ".session-linked");
@@ -358,6 +361,55 @@ function scheduleAuthTimeout() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clearSendLockIfStale() {
+  if (!sendInProgress) return;
+  if (Date.now() - sendInProgressSince > SEND_LOCK_MAX_MS) {
+    console.warn("[WhatsApp] Cleared stale send lock after timeout.");
+    sendInProgress = false;
+    sendInProgressSince = 0;
+  }
+}
+
+function acquireSendLock() {
+  clearSendLockIfStale();
+  if (sendInProgress) return false;
+  sendInProgress = true;
+  sendInProgressSince = Date.now();
+  return true;
+}
+
+function releaseSendLock() {
+  sendInProgress = false;
+  sendInProgressSince = 0;
+}
+
+function sendBusyResponse(res) {
+  const busyForSec = sendInProgressSince
+    ? Math.max(1, Math.ceil((Date.now() - sendInProgressSince) / 1000))
+    : 0;
+  return res.status(429).json({
+    error: "Another WhatsApp send is in progress. Please wait a moment.",
+    retryAfterSec: 5,
+    busyForSec,
+  });
+}
+
+async function withSendTimeout(promise, label = "send") {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`WhatsApp ${label} timed out after ${Math.round(SEND_OPERATION_TIMEOUT_MS / 1000)}s. Try again.`));
+        }, SEND_OPERATION_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function isCommsError(err) {
@@ -941,7 +993,7 @@ async function performSend(digits, message, filePath, filename) {
 
   let lastErr = null;
   for (const chatId of targets) {
-    for (let attempt = 1; attempt <= 6; attempt += 1) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         await assertSendReady();
         await ensureChatRegistered(chatId);
@@ -956,7 +1008,7 @@ async function performSend(digits, message, filePath, filename) {
           console.warn(`[WhatsApp] Contact/LID error on ${chatId} — trying alternate chat id…`);
           break;
         }
-        if (isCommsError(err) && attempt < 6) {
+        if (isCommsError(err) && attempt < 3) {
           console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/6) — retrying…`);
           await sleep(4000 * attempt);
           continue;
@@ -978,7 +1030,7 @@ async function performSendText(digits, message) {
 
   let lastErr = null;
   for (const chatId of targets) {
-    for (let attempt = 1; attempt <= 6; attempt += 1) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         await assertSendReady();
         await ensureChatRegistered(chatId);
@@ -990,7 +1042,7 @@ async function performSendText(digits, message) {
           console.warn(`[WhatsApp] Contact/LID error on ${chatId} — trying alternate chat id…`);
           break;
         }
-        if (isCommsError(err) && attempt < 6) {
+        if (isCommsError(err) && attempt < 3) {
           console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/6) — retrying…`);
           await sleep(4000 * attempt);
           continue;
@@ -1013,7 +1065,7 @@ async function performSendImage(digits, message, filePath, filename) {
 
   let lastErr = null;
   for (const chatId of targets) {
-    for (let attempt = 1; attempt <= 6; attempt += 1) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         await assertSendReady();
         await ensureChatRegistered(chatId);
@@ -1028,7 +1080,7 @@ async function performSendImage(digits, message, filePath, filename) {
           console.warn(`[WhatsApp] Contact/LID error on ${chatId} — trying alternate chat id…`);
           break;
         }
-        if (isCommsError(err) && attempt < 6) {
+        if (isCommsError(err) && attempt < 3) {
           console.warn(`[WhatsApp] Comms not ready (attempt ${attempt}/6) — retrying…`);
           await sleep(4000 * attempt);
           continue;
@@ -1075,6 +1127,10 @@ app.get("/status", (_req, res) => {
     sessionLinked: linked,
     sessionRestoring: restoring,
     qrGeneration: state.qrGeneration,
+    sendInProgress,
+    sendBusyForSec: sendInProgressSince
+      ? Math.max(0, Math.floor((Date.now() - sendInProgressSince) / 1000))
+      : 0,
     hosted: IS_HOSTED,
   });
 });
@@ -1090,11 +1146,12 @@ app.post("/reset", async (_req, res) => {
 });
 
 app.post("/send-image", async (req, res) => {
-  if (sendInProgress) {
-    return res.status(429).json({ error: "Another WhatsApp send is in progress. Please wait a moment." });
+  if (!acquireSendLock()) {
+    return sendBusyResponse(res);
   }
 
   if (!state.ready || !client) {
+    releaseSendLock();
     return res.status(503).json({
       error: "WhatsApp not connected. Scan QR code in billing app.",
       needsReconnect: true,
@@ -1104,17 +1161,18 @@ app.post("/send-image", async (req, res) => {
   const { phone, message, imagePath, filename } = req.body || {};
   const digits = normalizePhone(phone);
   if (digits.length < 11) {
+    releaseSendLock();
     return res.status(400).json({ error: "Invalid phone number." });
   }
 
   const filePath = path.resolve(String(imagePath || ""));
   if (!filePath || !fs.existsSync(filePath)) {
+    releaseSendLock();
     return res.status(400).json({ error: "Offer image file not found." });
   }
 
-  sendInProgress = true;
   try {
-    await performSendImage(digits, message, filePath, filename);
+    await withSendTimeout(performSendImage(digits, message, filePath, filename), "image send");
     return res.json({ ok: true });
   } catch (err) {
     console.error("[WhatsApp] Send-image failed:", err);
@@ -1123,16 +1181,17 @@ app.post("/send-image", async (req, res) => {
       needsReconnect: isSessionError(err),
     });
   } finally {
-    sendInProgress = false;
+    releaseSendLock();
   }
 });
 
 app.post("/send-text", async (req, res) => {
-  if (sendInProgress) {
-    return res.status(429).json({ error: "Another WhatsApp send is in progress. Please wait a moment." });
+  if (!acquireSendLock()) {
+    return sendBusyResponse(res);
   }
 
   if (!state.ready || !client) {
+    releaseSendLock();
     return res.status(503).json({
       error: "WhatsApp not connected. Scan QR code in billing app.",
       needsReconnect: true,
@@ -1142,16 +1201,17 @@ app.post("/send-text", async (req, res) => {
   const { phone, message } = req.body || {};
   const digits = normalizePhone(phone);
   if (digits.length < 11) {
+    releaseSendLock();
     return res.status(400).json({ error: "Invalid phone number." });
   }
   if (!String(message || "").trim()) {
+    releaseSendLock();
     return res.status(400).json({ error: "Message is required." });
   }
 
-  sendInProgress = true;
   try {
     try {
-      await performSendText(digits, message);
+      await withSendTimeout(performSendText(digits, message), "text send");
       return res.json({ ok: true });
     } catch (err) {
       if (err.code === "NOT_ON_WHATSAPP") {
@@ -1160,6 +1220,7 @@ app.post("/send-text", async (req, res) => {
 
       if (isSessionError(err)) {
         console.error("[WhatsApp] Send-text session error:", err.message);
+        releaseSendLock();
         const reconnected = await softRecoverClient(err.message);
         if (!reconnected) {
           return res.status(503).json({
@@ -1167,8 +1228,15 @@ app.post("/send-text", async (req, res) => {
             needsReconnect: true,
           });
         }
-        await performSendText(digits, message);
-        return res.json({ ok: true, recovered: true });
+        if (!acquireSendLock()) {
+          return sendBusyResponse(res);
+        }
+        try {
+          await withSendTimeout(performSendText(digits, message), "text send retry");
+          return res.json({ ok: true, recovered: true });
+        } finally {
+          releaseSendLock();
+        }
       }
 
       throw err;
@@ -1177,16 +1245,17 @@ app.post("/send-text", async (req, res) => {
     console.error("[WhatsApp] Send-text failed:", err);
     return res.status(500).json({ error: err.message || "Send failed." });
   } finally {
-    sendInProgress = false;
+    releaseSendLock();
   }
 });
 
 app.post("/send", async (req, res) => {
-  if (sendInProgress) {
-    return res.status(429).json({ error: "Another WhatsApp send is in progress. Please wait a moment." });
+  if (!acquireSendLock()) {
+    return sendBusyResponse(res);
   }
 
   if (!state.ready || !client) {
+    releaseSendLock();
     return res.status(503).json({
       error: "WhatsApp not connected. Scan QR code in billing app.",
       needsReconnect: true,
@@ -1196,18 +1265,19 @@ app.post("/send", async (req, res) => {
   const { phone, message, pdfPath, filename } = req.body || {};
   const digits = normalizePhone(phone);
   if (digits.length < 11) {
+    releaseSendLock();
     return res.status(400).json({ error: "Invalid phone number." });
   }
 
   const filePath = path.resolve(String(pdfPath || ""));
   if (!filePath || !fs.existsSync(filePath)) {
+    releaseSendLock();
     return res.status(400).json({ error: "Invoice PDF file not found." });
   }
 
-  sendInProgress = true;
   try {
     try {
-      await performSend(digits, message, filePath, filename);
+      await withSendTimeout(performSend(digits, message, filePath, filename), "bill send");
       return res.json({ ok: true });
     } catch (err) {
       if (err.code === "NOT_ON_WHATSAPP") {
@@ -1216,6 +1286,7 @@ app.post("/send", async (req, res) => {
 
       if (isSessionError(err)) {
         console.error("[WhatsApp] Send session error:", err.message);
+        releaseSendLock();
         const reconnected = await softRecoverClient(err.message);
         if (!reconnected) {
           const friendly = isCommsError(err)
@@ -1228,8 +1299,15 @@ app.post("/send", async (req, res) => {
             needsReconnect: true,
           });
         }
-        await performSend(digits, message, filePath, filename);
-        return res.json({ ok: true, recovered: true });
+        if (!acquireSendLock()) {
+          return sendBusyResponse(res);
+        }
+        try {
+          await withSendTimeout(performSend(digits, message, filePath, filename), "bill send retry");
+          return res.json({ ok: true, recovered: true });
+        } finally {
+          releaseSendLock();
+        }
       }
 
       if (isStoreError(err)) {
@@ -1265,7 +1343,7 @@ app.post("/send", async (req, res) => {
       needsReconnect: isSessionError(err),
     });
   } finally {
-    sendInProgress = false;
+    releaseSendLock();
   }
 });
 
